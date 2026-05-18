@@ -1,5 +1,10 @@
 # Agent Council
 
+[![tests](https://github.com/Avyayalaya/agent-council/actions/workflows/test.yml/badge.svg)](https://github.com/Avyayalaya/agent-council/actions/workflows/test.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python ≥3.11](https://img.shields.io/badge/python-≥3.11-blue.svg)](pyproject.toml)
+[![version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md)
+
 > *"Looks good" is not a quality gate. This is.*
 
 A runtime-portable 5-agent council that adjudicates text artifacts before they ship. Five role-conditioned LLM deliberators run in a 2-round async protocol with cross-read rebuttal. One verdict — `SHIP`, `REVISE`, or `HOLD` — plus a structured revision brief and a full audit transcript.
