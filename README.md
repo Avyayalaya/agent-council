@@ -42,7 +42,27 @@ Requires Python ≥3.11 and at least one supported LLM CLI on PATH.
 
 ### MCP server (Claude Desktop, Cursor, Cline, custom agents)
 
-Coming in v0.1.1. See [issue #1](https://github.com/Avyayalaya/agent-council/issues) to track.
+```bash
+pip install mcp>=1.0
+```
+
+Add to your client's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "agent-council": {
+      "command": "python",
+      "args": ["<absolute-path>/agent-council/mcp/agent_council_mcp_server.py"],
+      "env": {
+        "COUNCIL_CONFIG": "<absolute-path>/agent-council/council.yaml"
+      }
+    }
+  }
+}
+```
+
+Tool exposed: `council_review(artifact_path, tier=1)`. Full setup: [mcp/README.md](mcp/README.md). `council_sweep` and `council_audit` tools land in v0.1.2.
 
 ### Any other LLM (ChatGPT, Gemini, manual)
 
