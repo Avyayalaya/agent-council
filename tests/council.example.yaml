@@ -1,0 +1,57 @@
+# Test config — drives the end-to-end orchestrator test via mock_cli.
+# Production-shaped, but pointed at the deterministic mock adapter so tests
+# run without invoking real Claude (zero token burn, fully offline).
+
+version: "1.0"
+
+runtime:
+  type: mock_cli
+  binary: ""
+  model: claude-opus-4-7
+  flags: []
+  invocation_pattern: stdin
+  timeout_seconds: 30
+
+deliberators:
+  - id: skeptic
+    prompt: ../prompts/skeptic.md
+    weight: 1.0
+  - id: voice_identity
+    prompt: ../prompts/voice_identity.md
+    weight: 1.0
+  - id: evidence
+    prompt: ../prompts/evidence.md
+    weight: 1.0
+  - id: strategy
+    prompt: ../prompts/strategy.md
+    weight: 1.0
+
+adjudicator:
+  prompt: ../prompts/adjudicator.md
+  verdict_policy:
+    ship: "0 deliberators set would_block:true after R2"
+    revise: "1-2 would_block AND no 'irreducible' flag"
+    hold: "3+ would_block OR any 'irreducible' flag"
+
+protocol:
+  rounds: 2
+  cross_read: true
+  fail_fast_on_runtime_error: false
+  min_deliberators_for_verdict: 3
+
+tier_classifier:
+  type: rules
+  default_tier: 1
+
+tier_rules:
+  tier_1:
+    linkedin_post:
+      - "*linkedin*"
+      - "*substack*"
+      - "*sample_artifact*"
+
+logging:
+  log_path: ./test_council_log.jsonl
+  archive_dir: ./test_council_archive
+  log_format: rule_35_v2
+  redact_patterns: []

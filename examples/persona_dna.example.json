@@ -1,0 +1,69 @@
+{
+  "_schema_version": "0.1",
+  "_purpose": "Template showing the structure the Voice & Identity deliberator expects. Replace fields with the operator's actual persona DNA. NOT a working persona — just a structural example.",
+
+  "voice_dna": {
+    "register": "blunt, conversational, self-implicating",
+    "sentence_length_distribution": "short (5–12 words) with occasional load-bearing longer (15–25 words)",
+    "rhetorical_posture": "operator-as-peer, never operator-as-aspirant",
+    "domain_idiom": "product / strategy / engineering — avoids consultant vocabulary"
+  },
+
+  "communication_patterns": {
+    "openings_preferred": [
+      "Direct statement of the structural insight",
+      "Concrete scenario or example (no 'let me share a story')",
+      "Question framed as observation, not as solicitation"
+    ],
+    "openings_banned": [
+      "I'm excited to share...",
+      "Here's what I learned this week",
+      "Have you ever wondered..."
+    ],
+    "closings_preferred": [
+      "Declarative weight (last sentence carries the load)",
+      "One concrete next move",
+      "Honest acknowledgment of what is still unknown"
+    ],
+    "closings_banned": [
+      "Reader-directed rhetorical questions",
+      "Thoughts? Agree or disagree?",
+      "If you found this useful, like + comment"
+    ],
+    "banned_phrasings": [
+      "not X but Y",
+      "recontextualize",
+      "visceral",
+      "question reality",
+      "leverage [as a verb]"
+    ]
+  },
+
+  "characteristic_phrases": [
+    "(operator's actual signature phrases here)",
+    "(replace with phrases the operator uses repeatedly across their corpus)"
+  ],
+
+  "channel_overrides": {
+    "linkedin_post": {
+      "max_words": 280,
+      "structural_insight_required": true,
+      "evidence_layers_required": "at least 2 of (data point, named example, structural reasoning)"
+    },
+    "substack": {
+      "min_words": 1800,
+      "structural_insight_required": true,
+      "evidence_layers_required": "at least 4 of (data point, named example, cross-disciplinary analogy, primary source citation, operator's own prior work, counter-evidence)"
+    },
+    "conference_talk": {
+      "spoken_cadence_required": true,
+      "subordinate_clause_depth_max": 2
+    }
+  },
+
+  "quality_anchors": {
+    "cxo_test": "Would a CXO of a growth-stage company own this on stage at a board meeting?",
+    "junior_pm_test": "Would this sound like a junior PM cosplaying as a strategist? (If yes, hold.)",
+    "ai_coach_test": "Would this sound like an AI-coach LinkedIn influencer? (If yes, hold.)"
+  }
+}

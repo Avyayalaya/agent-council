@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent_council"
+version = "0.1.0"
+description = "A runtime-portable 5-agent adjudicator council for universal quality gating of text artifacts."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Parth Sangani" }
+]
+keywords = [
+    "agent",
+    "council",
+    "llm",
+    "quality-gate",
+    "adjudication",
+    "multi-agent",
+    "claude",
+    "ollama"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12"
+]
+# No required deps for v0.1 — pure stdlib. pyyaml is optional (we ship a mini parser).
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6.0"]
+test = ["pytest>=7.0"]
+
+[project.scripts]
+agent-council = "agent_council.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/avyayalaya/agent-council"
+Source = "https://github.com/avyayalaya/agent-council"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+agent_council = ["py.typed"]

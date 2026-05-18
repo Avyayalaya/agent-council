@@ -1,0 +1,168 @@
+# council.yaml.example — reference configuration for the Agent Council
+#
+# This is a reference config. You will need to:
+#   1. Copy to council.yaml in your project (the real config is gitignored).
+#   2. Supply your own voice / identity corpus at ./examples/voice_recipe.example.md
+#   3. Supply your own goals / north-star doc at ./examples/life_goals.example.md
+#   4. Adjust `runtime.type` to your installed CLI (claude_cli | mock_cli | lmstudio | ollama).
+#   5. Tune `tier_rules` to your artifact-naming conventions.
+#
+# Then run:
+#   python -m agent_council review path/to/artifact.md --tier=1 --config=council.yaml
+#
+# Every section is documented inline. Comments mark the fields you typically edit.
+
+version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Runtime — which CLI binary the Council shells out to.
+# ---------------------------------------------------------------------------
+runtime:
+  type: claude_cli            # claude_cli | mock_cli | lmstudio | ollama | gh_models
+  binary: claude              # PATH-resolvable binary name
+  model: claude-opus-4-7      # model name passed through to the CLI
+  flags: ["--print"]          # adapter-specific flags
+  invocation_pattern: stdin   # stdin | args | file
+  timeout_seconds: 600        # per-deliberator-call timeout. Large artifacts
+                              # (~1500 words) on Opus need 5-7 min; 180s causes
+                              # mid-call aborts.
+
+# Alternative runtimes — uncomment and edit if you want to drive the Council
+# with a local model instead of Claude. Pick exactly one runtime block.
+#
+# ---------------------------------------------------------------------------
+# LM Studio (HTTP, OpenAI-compatible) — recommended for local-machine testing.
+# Run LM Studio's "Local Server" with a loaded model, then:
+# ---------------------------------------------------------------------------
+# runtime:
+#   type: lmstudio
+#   base_url: http://localhost:1234/v1   # LM Studio default; trailing slash stripped
+#   model: qwen2.5-7b-instruct           # whatever you have loaded
+#   api_key: ""                          # LM Studio doesn't require auth by default
+#   timeout_seconds: 600
+#
+# Known caveat: LM Studio returns HTTP 500 on large parallel prompts at default
+# concurrency / context settings. Tune max_concurrent and context_length in
+# LM Studio's server config, or fall back to claude_cli for tier-1 gating.
+#
+# ---------------------------------------------------------------------------
+# Ollama (subprocess, stdin pipe) — local + offline, no HTTP server needed.
+# Install ollama and pull a model first: `ollama pull llama3.1`.
+# ---------------------------------------------------------------------------
+# runtime:
+#   type: ollama
+#   binary: ollama
+#   model: llama3.1
+#   flags: []
+#   invocation_pattern: stdin
+#   timeout_seconds: 600
+
+# ---------------------------------------------------------------------------
+# Deliberators — the 4 critics running in parallel.
+# Each deliberator gets a role-specific prompt and optional context_refs.
+# ---------------------------------------------------------------------------
+deliberators:
+  - id: skeptic
+    prompt: ./prompts/skeptic.md
+    weight: 1.0
+
+  - id: voice_identity
+    prompt: ./prompts/voice_identity.md
+    weight: 1.0
+    context_refs:
+      # The Voice & Identity deliberator needs your voice / identity corpus to
+      # check tone, banned patterns, and identity coherence. Supply your own
+      # files; the examples/ directory ships templates showing the expected
+      # structure.
+      - ./examples/voice_recipe.example.md
+      - ./examples/persona_dna.example.json
+
+  - id: evidence
+    prompt: ./prompts/evidence.md
+    weight: 1.0
+
+  - id: strategy
+    prompt: ./prompts/strategy.md
+    weight: 1.0
+    context_refs:
+      # The Strategy & Stakes deliberator needs your canonical goals doc to
+      # assess goal-fit and stake calibration. Supply your own; the example
+      # shows the expected sections (north-star, objectives, active projects,
+      # kill-criteria).
+      - ./examples/life_goals.example.md
+
+# ---------------------------------------------------------------------------
+# Adjudicator — the synthesizer. Single call after R1 + R2.
+# ---------------------------------------------------------------------------
+adjudicator:
+  prompt: ./prompts/adjudicator.md
+  verdict_policy:
+    # These are documentation; the policy logic is enforced in code.
+    # See src/agent_council/verdict.py:VerdictPolicy.apply.
+    ship: "0 deliberators set would_block:true after R2"
+    revise: "1-2 would_block AND no 'irreducible' flag"
+    hold: "3+ would_block OR any 'irreducible' flag"
+
+# ---------------------------------------------------------------------------
+# Protocol — round mechanics.
+# ---------------------------------------------------------------------------
+protocol:
+  rounds: 2                          # 1 = independent only, 2 = with cross-read rebuttal
+  cross_read: true                   # R2 sees other deliberators' R1
+  fail_fast_on_runtime_error: false  # one deliberator failing != Council failing
+  min_deliberators_for_verdict: 3    # below this, verdict = INCOMPLETE
+
+# ---------------------------------------------------------------------------
+# Tier classification — which artifacts the Council reviews.
+# ---------------------------------------------------------------------------
+tier_classifier:
+  type: rules                        # rules | model | hybrid (v1: rules only)
+  default_tier: 2                    # unclassified artifacts skip Council
+
+# Inline rules — edit these to match your artifact naming conventions.
+# For larger rule sets, point at an external tier_rules.yaml.
+tier_rules:
+  tier_1:
+    # Any glob matching here is treated as tier 1 (always fires).
+    # Keys are artifact_type labels (used in council_log.jsonl for compounding memory).
+    linkedin_post:
+      - "*linkedin*"
+      - "*_linkedin_*.md"
+    substack_post:
+      - "*substack*"
+    learnings:
+      - "**/learnings.md"
+    memory:
+      - "**/MEMORY.md"
+      - "**/memory/*.md"
+    resume:
+      - "*resume*"
+      - "*profile*"
+  tier_3:
+    # Tier 3 fires on a 1-in-5 sample (deterministic hash).
+    daily_brief:
+      - "**/briefing*.md"
+    analysis:
+      - "**/signals/*.json"
+
+# ---------------------------------------------------------------------------
+# Logging — where verdicts are persisted.
+# ---------------------------------------------------------------------------
+logging:
+  log_path: ./council_log.jsonl
+  archive_dir: ./council_archive
+  log_format: rule_35_v2             # rule_35_v2 | generic_json | none
+  redact_patterns: []                # regex patterns to scrub from logs
+
+# ---------------------------------------------------------------------------
+# Watch — paths the daily-sweep subcommand walks.
+# Replace these with paths to your own draft / artifact directories.
+# ---------------------------------------------------------------------------
+watch:
+  paths:
+    - ./drafts/
+    - ./artifacts/
+  tier_overrides:
+    "*_substack_*": 1
+    "*_linkedin_*": 1
+    "learnings.md": 1

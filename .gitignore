@@ -1,0 +1,46 @@
+# Council runtime state (instance-specific, never committed)
+council_log.jsonl
+council_archive/
+council.yaml
+
+# Bench run outputs — only the W2 mock milestone + W3+ official runs commit.
+# Everything else is local scratch (smoke runs, ad-hoc, scratch dirs).
+bench/results/*/
+!bench/results/mock_run_w2/
+!bench/results/.gitkeep
+!bench/results/README.md
+# Test scratch directories created by the bench self-tests.
+tests/test_bench_out/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+.Python
+build/
+dist/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.env
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# OS junk
+.DS_Store
+Thumbs.db
