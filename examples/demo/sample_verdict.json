@@ -1,0 +1,94 @@
+{
+  "v": 2,
+  "ts": "2026-05-18T14:23:11.504Z",
+  "artifact": "examples/demo/sample_linkedin_post.md",
+  "artifact_type": "linkedin_post",
+  "artifact_sha": "5e7a2b4f8c9d1a3e6f0b7c4d8e9f1a2b",
+  "span_id": "sp-r1k2m9p4-7n8x",
+  "tier": 1,
+  "round1": [
+    {
+      "deliberator": "skeptic",
+      "verdict": "revise",
+      "scores": {"argument_soundness": 3, "evidence_completeness": 2, "objection_pre_emption": 3},
+      "would_block": true,
+      "irreducible": false,
+      "schema_failed": false,
+      "concerns": [
+        {"locus": "paragraph 5 — 'all three reported their agentic-product cycle time dropped by half'", "issue": "T5 claim — three teams, self-reported, no link, no methodology. Single biggest credibility hit in the post."},
+        {"locus": "paragraph 7 — counter-argument", "issue": "Counter is named but the response is rhetorical ('protocol collapses into another notebook') rather than evidential. A skeptical reader expects an evidence delta, not a metaphor."}
+      ],
+      "revision_brief": "Either link the methodology behind the 'cycle time dropped by half' claim, or rephrase as 'in three pilots, all three teams self-reported shorter cycles' — the calibrated form is honest and lands the point. Strengthen the self-serve counter with one specific evidence point, not a metaphor."
+    },
+    {
+      "deliberator": "voice_identity",
+      "verdict": "revise",
+      "scores": {"voice_match": 3, "register_fit": 4, "cxo_test": 4},
+      "would_block": true,
+      "irreducible": false,
+      "schema_failed": false,
+      "voice_violations": [
+        {"line": 7, "rule": "V1", "snippet": "Not a product but a protocol", "fix": "Drop 'not X but Y'. Say 'Lattice is a protocol' directly."},
+        {"line": 7, "rule": "V3", "snippet": "recontextualizes how a PM team works", "fix": "Hype word 'recontextualize'. Replace with 'changes' or a specific verb."}
+      ],
+      "revision_brief": "Two specific voice violations identified above (V1 and V3). Otherwise voice is sound — register is right for LinkedIn (long-form post), the CXO test passes, and the closing has declarative weight."
+    },
+    {
+      "deliberator": "evidence",
+      "verdict": "revise",
+      "scores": {"source_verification": 2, "tier_classification": 4, "confidence_calibration": 3},
+      "would_block": true,
+      "irreducible": false,
+      "schema_failed": false,
+      "evidence_concerns": [
+        {"claim": "agentic-product cycle time dropped by half", "tier": "T5", "issue": "Operator claim, plausible, not externally verifiable. Three pilots, self-reporting, no link to methodology. Acceptable if explicitly framed as such (P59), unacceptable if framed as a quantified result."},
+        {"claim": "RICE, Kano, OKRs were sharpened against human-only workflows", "tier": "T6", "issue": "Asserted, not sourced. Plausible but the post would land harder with one sourced example of a framework failing in an agentic context."}
+      ],
+      "revision_brief": "Reframe the cycle-time claim per P59 as a calibrated operator claim ('in three pilots, all three teams self-reported...') rather than presenting it as a measured outcome. Add one sourced example of framework-in-agentic-context failure to ground the abstract claim."
+    },
+    {
+      "deliberator": "strategy",
+      "verdict": "ship",
+      "scores": {"goal_fit": 4, "stake_calibration": 4, "opportunity_cost": 4},
+      "would_block": false,
+      "irreducible": false,
+      "schema_failed": false,
+      "concerns": [
+        "Goal-fit is strong — Lattice positioning serves both the Matter (authority) and Earn (consultancy income) goals.",
+        "Stake-calibration is appropriate — LinkedIn post is the right surface for this depth of claim; saves Substack for the long-form derivation."
+      ],
+      "revision_brief": "No blocking strategic concerns. One observation: if the pricing is the lead in the post (it appears in paragraph 7 with two specific numbers), it should either be earlier and load-bearing, or removed. Pricing mid-post reads as a sales tail."
+    }
+  ],
+  "round2": [
+    {
+      "deliberator": "skeptic",
+      "verdict": "revise",
+      "delta_from_r1": "Voice and Evidence converged on the same T5 issue. Held position; T5 concern is now triangulated and reducible with one rewrite."
+    },
+    {
+      "deliberator": "voice_identity",
+      "verdict": "revise",
+      "delta_from_r1": "Held; V1+V3 are line-level, reducible."
+    },
+    {
+      "deliberator": "evidence",
+      "verdict": "revise",
+      "delta_from_r1": "Held; saw Skeptic's concern about the counter-argument response and notes it as adjacent to the calibration issue."
+    },
+    {
+      "deliberator": "strategy",
+      "verdict": "ship",
+      "delta_from_r1": "Held; the strategic stakes haven't changed based on the line-level concerns from the others."
+    }
+  ],
+  "adjudicator": {
+    "final_verdict": "REVISE",
+    "reasoning": "3 deliberators block on reducible issues (V1+V3 line edits, T5 calibration rephrase, evidence support for one structural claim). Strategy passes outright. No irreducible flags. Verdict policy: 3+ would_block but Adjudicator reasons downgrade — apply revision_brief, do not redraft. Compounding-loop note: prior verdicts on artifact_type=linkedin_post show this is the 2nd Lattice-positioning artifact reviewed; the V1+V3 pattern (split-form negation-pivot + recontextualize) has been flagged before. Adding V13/V14 to the producing agent's voice gate may compound across future posts.",
+    "revision_brief": "1. Replace 'Not a product but a protocol' (V1) with 'Lattice is a protocol' (paragraph 4).\n2. Replace 'recontextualizes how a PM team works' (V3) with 'changes how a PM team works' or a more specific verb.\n3. Reframe the cycle-time claim: 'in three pilots, all three teams self-reported shorter cycles' instead of 'cycle time dropped by half'.\n4. Add one sourced framework-in-agentic-context failure example to ground the 'framework collapse' claim.\n5. Strengthen the self-serve counter with an evidence point (e.g., 'in two of the three pilots, teams that started without a facilitator ran for 6 weeks before abandoning the protocol') rather than a metaphor.\n6. Consider moving the pricing reference earlier or removing it — mid-post pricing reads as a sales tail.",
+    "applied_compounding": true,
+    "prior_verdicts_consulted": 2,
+    "schema_failed": false
+  },
+  "elapsed_seconds": 312.4
+}

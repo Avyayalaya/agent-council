@@ -161,6 +161,10 @@ python -m agent_council audit --since=7d --verdict=HOLD
 
 Output goes to stdout as JSON; the audit row appends to `council_log.jsonl`.
 
+### See what a verdict looks like
+
+[`examples/demo/`](examples/demo/) ships a fictional LinkedIn post + the structured verdict the Council produced for it + the extracted revision brief. Read these first to calibrate expectations before running your first real review.
+
 ### Tier classification
 
 The Council is designed for **tier-1 artifacts** — the ones where review cost is justified:
