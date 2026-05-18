@@ -1,37 +1,57 @@
 # Agent Council
 
-**A runtime-portable adjudicator council for quality-gating text artifacts.**
+> *"Looks good" is not a quality gate. This is.*
 
-Five role-conditioned LLM deliberators run in a 2-round async protocol with cross-read rebuttal. They produce one verdict — `SHIP`, `REVISE`, or `HOLD` — plus a revision brief and a full audit transcript. No SDK. No API keys. Just a CLI binary you already have.
+A runtime-portable 5-agent council that adjudicates text artifacts before they ship. Five role-conditioned LLM deliberators run in a 2-round async protocol with cross-read rebuttal. One verdict — `SHIP`, `REVISE`, or `HOLD` — plus a structured revision brief and a full audit transcript.
 
-Built to sit in front of any text artifact you don't want to ship un-reviewed: published writing, public READMEs, investor messages, identity-shaping documents, memory additions to an agent system. Modularity invariant is CI-tested — the council can be removed and the producing agents keep working unchanged.
+No SDK. No API keys. No vendor lock-in. The Council shells out to whatever LLM CLI is configured (`claude`, `lmstudio`, `ollama`, mock). Modularity invariant is CI-tested — the council can be removed and producing agents keep working unchanged.
 
-> **Status:** v0.1.0 — initial public release. Architecture + design + 5 deliberator prompts + 4 runtime adapters. Empirical evaluation forthcoming in v0.2 ([Roadmap](#roadmap)).
+[Install](#install) · [How it works](#how-it-works) · [Quickstart](#quickstart) · [Customize](#customize) · [AGENTS.md](AGENTS.md) · [CHANGELOG](CHANGELOG.md)
 
----
-
-## Why a council, not a single judge?
-
-LLM-as-judge approaches collapse five distinct concerns into one critic:
-- Is the argument adversarially sound?
-- Does it match the operator's voice?
-- Are the sources credible?
-- Does it advance the operator's actual goals?
-- Should it ship?
-
-A unified judge averages these into a single score. The council keeps them separated. Each deliberator owns one concern, reads one context, and surfaces one kind of dissent. The Adjudicator merges them — but you see *which* deliberator blocked and *why*, not just the merged number.
-
-This matters for tier-1 artifacts where the cost of shipping a flaw is high (public publish, irreversible commitment, identity-shaping document) and the cost of not shipping a good draft is low (one more revision pass).
+> **v0.1.0** ships architecture + design only. Empirical evaluation (benchmark + arXiv paper) lands in v0.2 — see [Roadmap](#roadmap).
 
 ---
 
-## Architecture
+## Install
+
+### Claude Code (plugin)
+
+```bash
+claude plugin marketplace add Avyayalaya/agent-council
+claude plugin install agent-council@avyayalaya
+```
+
+Then in any Claude Code session: `/council-review path/to/artifact.md` or `/council-sweep`.
+
+### Python (pip from source)
+
+```bash
+git clone https://github.com/Avyayalaya/agent-council.git
+cd agent-council
+pip install -e .
+cp council.yaml.example council.yaml  # then edit
+python -m agent_council review path/to/artifact.md --tier=1
+```
+
+Requires Python ≥3.11 and at least one supported LLM CLI on PATH.
+
+### MCP server (Claude Desktop, Cursor, Cline, custom agents)
+
+Coming in v0.1.1. See [issue #1](https://github.com/Avyayalaya/agent-council/issues) to track.
+
+### Any other LLM (ChatGPT, Gemini, manual)
+
+Read the 5 prompts at [`prompts/`](prompts/). Each is self-contained and explains what the deliberator should produce. Run them in your tool of choice, then merge the verdicts using the policy in [`src/agent_council/verdict.py`](src/agent_council/verdict.py).
+
+---
+
+## How it works
 
 ```
    ┌──────────┐
-   │ artifact │
-   └────┬─────┘
-        │
+   │ artifact │ ───► tier-1?  No  ───► skip
+   └────┬─────┘        │
+        │ Yes
         ▼
    ┌────────────────────────────────────────────────────────┐
    │  ROUND 1 — 4 deliberators run in parallel              │
@@ -47,25 +67,24 @@ This matters for tier-1 artifacts where the cost of shipping a flaw is high (pub
    ┌────────────────────────────────────────────────────────┐
    │  ROUND 2 — same 4 deliberators, with cross-read        │
    │                                                        │
-   │   Each sees the other 3 round-1 verdicts and may       │
-   │   update its position. Single-deliberator misfires     │
-   │   get corrected; independent first reads preserved.    │
+   │   Each sees the other 3 R1 verdicts; may update.       │
+   │   Single-deliberator misfires get corrected; indep-    │
+   │   endent first reads preserved.                        │
    └─────────────────────────────┬──────────────────────────┘
                                  │
                                  ▼
    ┌────────────────────────────────────────────────────────┐
-   │  ADJUDICATOR                                           │
+   │  ADJUDICATOR (single call)                             │
    │                                                        │
-   │   Merges 4 R2 verdicts + applies the D6 compounding    │
-   │   loop (reads prior verdicts on same artifact_type     │
-   │   from council_log.jsonl).                             │
+   │   Merges 4 R2 verdicts + reads prior verdicts on same  │
+   │   artifact_type from council_log.jsonl (D6 loop).      │
    │                                                        │
    │   Verdict policy:                                      │
-   │     3+ block on irreducible → HOLD                     │
-   │     3+ block on reducible + Adjudicator reasons        │
-   │       downgrade → REVISE (verdict-policy override)     │
-   │     otherwise → SHIP (with revision_brief if any       │
-   │       deliberator raised concerns)                     │
+   │     3+ block on irreducible       → HOLD               │
+   │     3+ block on reducible +                            │
+   │       Adjudicator reasons downgrade → REVISE           │
+   │     otherwise                       → SHIP             │
+   │                                  + revision_brief      │
    └─────────────────────────────┬──────────────────────────┘
                                  │
                                  ▼
@@ -78,81 +97,80 @@ This matters for tier-1 artifacts where the cost of shipping a flaw is high (pub
 
 | Deliberator | Concern | Reads |
 |---|---|---|
-| **Skeptic** | Adversarial review — pre-empts every reasonable objection. Catches premature coherence, narrative fallacy, survivorship bias. | (artifact only) |
-| **Voice & Identity** | Voice DNA, banned-pattern enforcement, channel register, CXO test. | Operator's voice corpus + persona DNA |
-| **Evidence & Calibration** | Source verification, evidence-tier classification (T1–T6), confidence levels, base rates. | (artifact only) |
-| **Strategy & Stakes** | Goal alignment, stake calibration, opportunity cost vs. operator's active projects. | Operator's goals doc + project state |
-| **Adjudicator** | Merge + prior-verdict loop. Final verdict. | All four above + `council_log.jsonl` |
+| **Skeptic** | Adversarial review — catches premature coherence, narrative fallacy, survivorship bias, unstated assumptions | (artifact only) |
+| **Voice & Identity** | Voice DNA, banned-pattern enforcement, channel register, CXO test | Operator's voice corpus + persona DNA |
+| **Evidence & Calibration** | Source verification, evidence-tier classification (T1–T6), confidence levels, base rates | (artifact only) |
+| **Strategy & Stakes** | Goal alignment, stake calibration, opportunity cost vs. operator's active projects | Operator's goals doc + project state |
+| **Adjudicator** | Merge + prior-verdict loop. Final verdict and revision brief | All four above + `council_log.jsonl` |
 
-### Tier classification
+### Why a council, not a single judge?
 
-The Council is designed for **tier-1 artifacts** — the ones where review cost is justified:
+LLM-as-judge approaches collapse five distinct concerns into one critic:
 
-- **Tier 1** (gates through Council): external-facing OR irreversible OR identity-shaping OR memory writes. Examples: published writing, public READMEs/AGENTS.md, investor messages, resume revisions, additions to a learnings file, memory writes.
-- **Tier 2** (skips Council): internal drafts, dashboards, infrastructure, dispatch updates.
-- **Tier 3** (1-in-5 sample): daily briefings, internal analyses, planning artifacts.
+- Is the argument adversarially sound?
+- Does it match the operator's voice?
+- Are the sources credible?
+- Does it advance the operator's actual goals?
+- Should it ship?
 
-Tier classification is rule-based in v0.1 (glob patterns in `council.yaml#tier_rules`). Model-based and hybrid classifiers are on the v0.3 roadmap.
+A unified judge averages these into one score. The Council keeps them separated. Each deliberator owns one concern, reads one context, surfaces one kind of dissent. The Adjudicator merges them — but you see *which* deliberator blocked and *why*, not just the merged number.
+
+This matters for tier-1 artifacts where the cost of shipping a flaw is high (public publish, irreversible commitment, identity-shaping document) and the cost of one more revision pass is low.
 
 ---
 
 ## Quickstart
 
-### 1. Install
+After `pip install -e .` and copying `council.yaml.example` → `council.yaml`:
 
 ```bash
-git clone https://github.com/Avyayalaya/agent-council.git
-cd agent-council
-pip install -e .
+# Single artifact
+python -m agent_council review path/to/artifact.md --tier=1
+
+# Daily sweep over watch paths
+python -m agent_council sweep --since=24h
+
+# Audit recent verdicts (filter by date/verdict/artifact-type)
+python -m agent_council audit --since=7d --verdict=HOLD
 ```
 
-Requires Python ≥3.11 and at least one supported LLM CLI on `PATH` (see [Runtimes](#runtimes)).
+Output goes to stdout as JSON; the audit row appends to `council_log.jsonl`.
 
-### 2. Configure
+### Tier classification
 
-```bash
-cp council.yaml.example council.yaml
-```
+The Council is designed for **tier-1 artifacts** — the ones where review cost is justified:
 
-Edit `council.yaml`:
+- **Tier 1** (gates through Council): external-facing OR irreversible OR identity-shaping OR memory writes. Examples: published writing, public READMEs, investor messages, resume revisions, additions to a learnings file, memory writes.
+- **Tier 2** (skips Council): internal drafts, dashboards, infrastructure, dispatch updates.
+- **Tier 3** (1-in-5 sample): daily briefings, internal analyses, planning artifacts.
 
-- Set `runtime.type` to your installed CLI (`claude_cli`, `lmstudio`, `ollama`, or `mock_cli` for smoke tests).
-- Replace `./examples/voice_recipe.example.md` and `./examples/life_goals.example.md` with paths to your own voice corpus and goals doc. The example files in `examples/` show the expected structure.
-- Tune `tier_rules` to match your artifact-naming conventions.
-
-### 3. Run a review
-
-```bash
-python -m agent_council review path/to/artifact.md --tier=1 --config=council.yaml
-```
-
-Output: a JSON verdict on stdout + a v2 audit row appended to `council_log.jsonl`.
-
-### 4. Daily sweep (optional)
-
-```bash
-python -m agent_council sweep --since=24h --config=council.yaml
-```
-
-Walks the `watch.paths` declared in `council.yaml` and runs Council on every artifact modified in the window.
+Tier classification is rule-based in v0.1 — glob patterns in `council.yaml#tier_rules`. Model-based and hybrid classifiers are on the v0.3 roadmap.
 
 ---
 
-## Runtimes
+## Built for agents
 
-The Council shells out to whatever LLM CLI is configured. Adding a new runtime is one file in `src/agent_council/runtimes/` that subclasses `RuntimeAdapter`.
+The Council was designed to be invoked from outside an agent loop, not from inside it. That's not a stylistic choice — it's a **CI-tested invariant**:
 
-| Runtime | Recommended for | Caveats |
-|---|---|---|
-| `claude_cli` | Production tier-1 gating | Requires Anthropic Claude CLI installed + authenticated |
-| `lmstudio` | Local sub-sample testing | HTTP 500 on large parallel prompts at default concurrency — tune `max_concurrent` and `context_length` in LM Studio settings |
-| `ollama` | Offline / local-first setups | Lower-end models may not satisfy the deliberator schema; fall back to `claude_cli` for production |
-| `mock_cli` | CI / smoke tests | Returns fixed canned responses for testing the orchestrator without burning tokens |
-| `gh_models` | Stub (documented fallback) | Not yet implemented; placeholder for future GitHub Models adapter |
+```bash
+PYTHONPATH=src python -m unittest tests.test_modularity_invariant -v
+```
+
+The test scans the host operator system's `agents/*/prompt.md` files and asserts zero references to Council. If a producing agent's prompt starts to know about the gate that reviews it, the build fails.
+
+This means:
+
+- An orchestrator can route any artifact to Council without touching the producing agent.
+- Removing the Council leaves every producing agent functional (with reduced quality on tier-1 artifacts).
+- The Council ships as a **standalone runtime** — wire it into Emissary, MCP servers, slash commands, CI pipelines, or your own agent system without coupling.
+
+[`AGENTS.md`](AGENTS.md) is the machine-readable capability manifest — agent orchestrators read this to route tasks without reading 1,300 lines of source.
 
 ---
 
-## Writing a new runtime adapter
+## Customize
+
+### Add a new runtime adapter (one file)
 
 ```python
 # src/agent_council/runtimes/my_runtime.py
@@ -160,33 +178,33 @@ from .base import RuntimeAdapter
 
 class MyRuntimeAdapter(RuntimeAdapter):
     async def invoke(self, prompt: str, *, timeout: int) -> str:
-        # Shell out to your CLI; return the model's response as a string.
-        # Use asyncio.create_subprocess_exec for stdin-piped CLIs,
-        # or httpx.AsyncClient for HTTP-based ones.
+        # Shell out / HTTP / SDK call — return the model's response.
         ...
 ```
 
-Register it in `src/agent_council/runtimes/__init__.py` and reference by `type:` in `council.yaml`.
+Register in `src/agent_council/runtimes/__init__.py`, reference by `type:` in `council.yaml`. The adapter's interface is the only contract; the orchestrator handles retries, schema validation, cross-read marshaling.
 
----
+### Add a new deliberator (one prompt file)
 
-## Writing a new deliberator prompt
+Drop a `prompts/<name>.md` following the 5-section template:
 
-Each deliberator prompt at `prompts/*.md` follows a 5-section template:
-
-1. **Role declaration** — one paragraph: who you are, what you optimize for, what you do NOT do.
-2. **Methodology** — how to read the artifact and produce the critique (numbered steps).
-3. **Context Verification Gate** — files this deliberator must have access to before producing a verdict.
-4. **Output schema** — exact JSON shape the orchestrator expects. See `src/agent_council/schema.py` for the type contract.
+1. **Role declaration** — who you are, what you optimize for, what you do NOT do.
+2. **Methodology** — numbered steps for reading the artifact and producing the critique.
+3. **Context Verification Gate** — files this deliberator must have access to.
+4. **Output schema** — matching the JSON shape in [`src/agent_council/schema.py`](src/agent_council/schema.py).
 5. **Communication style** — 3–5 example phrases showing the deliberator's editorial voice.
 
-Adding a new deliberator: drop a new prompt file in `prompts/`, add the deliberator block to `council.yaml#deliberators`. The orchestrator will pick it up.
+Add a block to `council.yaml#deliberators`. The orchestrator picks it up.
+
+### Override the verdict policy
+
+`src/agent_council/verdict.py:VerdictPolicy.apply` is the single source of truth. Subclass it and pass to the orchestrator if you need different merge semantics. Unit tests at `tests/test_verdict_merge.py` pin the default behavior — fork them for your override.
 
 ---
 
-## What lives in `council_log.jsonl`
+## Audit log
 
-Every Council invocation appends a single line. Schema follows Rule 35 v2:
+Every Council invocation appends one line to `council_log.jsonl`. Schema follows Rule 35 v2:
 
 ```json
 {
@@ -194,10 +212,7 @@ Every Council invocation appends a single line. Schema follows Rule 35 v2:
   "ts": "2026-05-18T...Z",
   "artifact": "path/to/artifact.md",
   "artifact_type": "linkedin_post",
-  "round1": [
-    {"deliberator": "skeptic", "verdict": "revise", "scores": {...}, "would_block": false, "revision_brief": "..."},
-    ...
-  ],
+  "round1": [{"deliberator": "skeptic", "verdict": "revise", "scores": {...}, "would_block": false, "revision_brief": "..."}, ...],
   "round2": [...],
   "adjudicator": {
     "final_verdict": "REVISE",
@@ -209,27 +224,47 @@ Every Council invocation appends a single line. Schema follows Rule 35 v2:
 }
 ```
 
-The log is append-only. The Adjudicator reads prior entries on the same `artifact_type` to apply the D6 compounding loop — every new verdict consults the history.
+Append-only. The Adjudicator reads prior entries on the same `artifact_type` to apply the **D6 compounding loop** — every new verdict consults the history. Two consecutive HOLDs on the same artifact_type sharpen the Adjudicator's reasoning on the third pass.
+
+Filter with `jq` or the `audit` subcommand:
+
+```bash
+jq 'select(.adjudicator.final_verdict == "HOLD")' council_log.jsonl
+python -m agent_council audit --since=7d --verdict=HOLD
+```
+
+---
+
+## Runtimes
+
+| Runtime | Recommended for | Notes |
+|---|---|---|
+| `claude_cli` | Production tier-1 gating | Requires Anthropic Claude CLI installed + authenticated. Default. |
+| `lmstudio` | Local sub-sample testing | HTTP 500 on large parallel prompts at default concurrency — tune `max_concurrent` and `context_length`. |
+| `ollama` | Offline / local-first | Lower-end models may not satisfy the deliberator schema; fall back to `claude_cli` for production. |
+| `mock_cli` | CI / smoke tests | Canned responses for testing the orchestrator without burning tokens. |
+| `gh_models` | Stub (documented fallback) | Placeholder for future GitHub Models adapter. |
+
+Mix runtimes within a single Council run — e.g., one deliberator on `lmstudio` for style diversity, the rest on `claude_cli`. Configure per-deliberator `runtime_override:` in `council.yaml`.
 
 ---
 
 ## Roadmap
 
-- **v0.1.0** *(this release)* — Architecture + design + 5 deliberator prompts + 4 runtime adapters. No empirical claims. License: MIT.
-- **v0.2.0** — Empirical evaluation. AgentOS-Bench-style 3-arm benchmark (baseline / unified-judge / Council). Recursive Council-on-Council validation study. Paper released to arXiv.
+- **v0.1.0** *(this release)* — Architecture + design + 5 prompts + 4 runtimes. License: MIT.
+- **v0.1.1** — MCP server wrapper (Claude Desktop, Cursor, Cline). GitHub Actions CI badge.
+- **v0.2.0** — Empirical evaluation. AgentOS-Bench-style 3-arm benchmark. Recursive Council-on-Council validation study. Paper released to arXiv.
 - **v0.3.0** — Adjudicator improvements + verdict-policy refinements based on 0.2 findings. Model-based and hybrid tier classifiers. Additional runtime adapters.
-- **v1.0.0** — Stable verdict JSON schema, exit codes, and CLI surface. Breaking changes will bump the minor version until 1.0.
-
-The verdict JSON schema, exit codes, and CLI subcommand names are the public surface; everything else is internal and may change between minor versions.
+- **v1.0.0** — Stable verdict JSON schema, exit codes, and CLI surface. Breaking changes will bump the minor version until then.
 
 ---
 
 ## Honest limitations
 
-- **Soft file-path coupling.** The Voice & Identity and Strategy & Stakes deliberators read external context files (your voice corpus, your goals doc). Council reads them as arbitrary text via the filesystem; what they contain is the operator's responsibility.
-- **Same-model self-style risk.** When all deliberators run on the same underlying model (e.g., all `claude_cli`), they share that model's style preferences and may converge on its blind spots. Mitigation: use the `lmstudio` or `ollama` runtime for one deliberator to introduce style diversity. Cross-model evaluation is a v0.2 work item.
-- **Behavioral coupling on producing agents.** If a producing agent learns "the Council will catch X," it may loosen on X. This is structural and unfixable inside the package; the mitigation is operator discipline — periodic audits of producing agents' outputs with Council OFF vs. ON.
-- **Adjudicator non-determinism.** Same artifact can produce slightly different verdicts across runs. Documented; treated as honest LLM-as-judge variance. The verdict-policy override only fires when the Adjudicator explicitly argues a downgrade.
+- **Soft file-path coupling.** Voice & Identity and Strategy & Stakes read external context files. What they contain is the operator's responsibility.
+- **Same-model self-style risk.** When all deliberators run on the same underlying model, they share that model's style preferences and may converge on its blind spots. Mitigation: run one deliberator on a different model family. Cross-model evaluation is a v0.2 work item.
+- **Behavioral coupling on producing agents.** If a producing agent learns "the Council will catch X," it may loosen on X. Structural and unfixable inside the package; mitigation is operator discipline (periodic audits with Council OFF vs. ON).
+- **Adjudicator non-determinism.** Same artifact can produce slightly different verdicts across runs. Documented; treated as honest LLM-as-judge variance.
 
 ---
 
@@ -239,7 +274,7 @@ The verdict JSON schema, exit codes, and CLI subcommand names are the public sur
 PYTHONPATH=src python -m unittest discover tests -v
 ```
 
-The orchestrator test uses `mock_cli`, so no real Claude tokens burn during CI runs.
+105 tests. The orchestrator test uses `mock_cli`, so no real Claude tokens burn during CI.
 
 ---
 
@@ -251,15 +286,9 @@ MIT. See [LICENSE](LICENSE).
 
 ## Citation
 
-If you reference the Council in research or writing, please cite:
-
 ```
-Agent Council: A runtime-portable adjudicator for tier-1 artifact gating.
+Agent Council: A runtime-portable adjudicator council for tier-1 artifact gating.
 v0.1.0, 2026. https://github.com/Avyayalaya/agent-council
 ```
 
 A formal paper accompanies v0.2.0.
-
----
-
-*Built for operators who want structured dissent before they ship — not just "looks good."*

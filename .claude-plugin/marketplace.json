@@ -1,0 +1,18 @@
+{
+  "name": "agent-council",
+  "description": "Runtime-portable 5-agent quality gate for tier-1 artifacts — installable as a Claude Code plugin",
+  "owner": {
+    "name": "Parth Sangani"
+  },
+  "plugins": [
+    {
+      "name": "agent-council",
+      "description": "Quality-gate any text artifact through 5 role-conditioned LLM deliberators (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator). 2-round async + cross-read. Returns SHIP/REVISE/HOLD + revision brief. Slash commands wrap the Python CLI.",
+      "version": "0.1.0",
+      "source": "./",
+      "author": {
+        "name": "Parth Sangani"
+      }
+    }
+  ]
+}

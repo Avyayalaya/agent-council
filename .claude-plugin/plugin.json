@@ -1,0 +1,20 @@
+{
+  "name": "agent-council",
+  "description": "Runtime-portable 5-agent quality gate for tier-1 text artifacts. Five role-conditioned LLM deliberators (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator) run in a 2-round async protocol with cross-read rebuttal. Returns one verdict — SHIP, REVISE, or HOLD — plus a revision brief and a full audit transcript. No SDK, no API keys; shells out to whatever CLI is configured (claude_cli, lmstudio, ollama, mock_cli). Designed for external publishes, irreversible commitments, identity-shaping documents, and memory writes.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Parth Sangani"
+  },
+  "license": "MIT",
+  "keywords": [
+    "quality-gate",
+    "multi-agent",
+    "adjudication",
+    "council",
+    "llm-as-judge",
+    "agent-orchestration",
+    "review",
+    "claude-code"
+  ],
+  "homepage": "https://github.com/Avyayalaya/agent-council"
+}
