@@ -1,0 +1,70 @@
+# GitHub Pages Configuration — Just the Docs Theme
+# Agent Council
+
+title: Agent Council
+description: A runtime-portable 5-agent council that adjudicates text artifacts before they ship
+url: https://avyayalaya.github.io
+baseurl: /agent-council
+
+# Theme
+remote_theme: just-the-docs/just-the-docs
+
+# Plugins
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+  - jekyll-include-cache
+  - jekyll-sitemap
+
+# Search
+search_enabled: true
+search:
+  heading_level: 2
+  previews: 3
+  preview_words_before: 5
+  preview_words_after: 10
+  tokenizer_separator: /[\s\-/]+/
+  rel_url: true
+  button: false
+
+# Aux links rendered top-right
+aux_links:
+  "GitHub":
+    - "https://github.com/Avyayalaya/agent-council"
+  "AGENTS.md":
+    - "https://github.com/Avyayalaya/agent-council/blob/main/AGENTS.md"
+
+aux_links_new_tab: true
+
+# Navigation order — folders without nav_order go last
+nav_sort: case_insensitive
+
+# Footer
+footer_content: 'Agent Council — MIT licensed. See <a href="https://github.com/Avyayalaya/agent-council/blob/main/LICENSE">LICENSE</a>.'
+
+# SEO + favicon
+heading_anchors: true
+color_scheme: light
+
+# Excludes from build
+exclude:
+  - .gitignore
+  - Gemfile
+  - Gemfile.lock
+  - LICENSE
+  - "*.py"
+  - "*.toml"
+  - "src/"
+  - "tests/"
+  - "council.yaml"
+  - "council_log.jsonl"
+  - "council_archive/"
+  - ".github/"
+  - "mcp/agent_council_mcp_server.py"
+  - "commands/"
+  - ".claude-plugin/"
+  - "examples/voice_recipe.example.md"
+  - "examples/life_goals.example.md"
+  - "examples/persona_dna.example.json"
+  - "prompts/"
+  - "council.yaml.example"
