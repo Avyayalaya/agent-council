@@ -1,0 +1,27 @@
+name: agent-council
+version: 0.1.0
+description: Runtime-portable 5-agent quality gate for tier-1 text artifacts. Five role-conditioned LLM deliberators (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator) run in a 2-round async protocol with cross-read rebuttal. Returns one verdict — SHIP, REVISE, or HOLD — plus a revision brief and a full audit transcript. Install once, use across every compatible agent harness via APM.
+
+# Marketplace authoring: source of truth for .claude-plugin/marketplace.json.
+# Regenerate the JSON with `apm pack` (https://github.com/microsoft/apm).
+marketplace:
+  owner:
+    name: Parth Sangani
+    url: https://github.com/Avyayalaya
+  packages:
+    - name: agent-council
+      description: Multi-agent quality gate that adjudicates text artifacts before they ship. 5 role-conditioned LLM deliberators, 2-round async + cross-read rebuttal, structured SHIP/REVISE/HOLD verdict with revision brief. Bundled MCP server + slash commands. 4 runtime adapters (claude_cli, lmstudio, ollama, mock_cli). No SDK, no API keys, no vendor lock-in.
+      source: ./
+      homepage: https://github.com/Avyayalaya/agent-council
+      version: 0.1.0
+      license: MIT
+      keywords:
+        - quality-gate
+        - multi-agent
+        - adjudication
+        - council
+        - llm-as-judge
+        - agent-orchestration
+        - review
+        - claude-code
+        - mcp
