@@ -11,6 +11,8 @@ A runtime-portable 5-agent council that adjudicates text artifacts before they s
 
 No SDK. No API keys. No vendor lock-in. The Council shells out to whatever LLM CLI is configured (`claude`, `lmstudio`, `ollama`, mock). Modularity invariant is CI-tested — the council can be removed and producing agents keep working unchanged.
 
+*Personal research, separate from my day-job at Microsoft. MIT-licensed.*
+
 [Install](#install) · [How it works](#how-it-works) · [Quickstart](#quickstart) · [Customize](#customize) · [AGENTS.md](AGENTS.md) · [CHANGELOG](CHANGELOG.md)
 
 > **v0.1.0** ships architecture + design only. Empirical evaluation (benchmark + arXiv paper) lands in v0.2 — see [Roadmap](#roadmap).
