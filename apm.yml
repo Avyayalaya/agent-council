@@ -1,6 +1,6 @@
 name: agent-council
-version: 0.1.0
-description: Runtime-portable 5-agent quality gate for tier-1 text artifacts. Five role-conditioned LLM deliberators (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator) run in a 2-round async protocol with cross-read rebuttal. Returns one verdict — SHIP, REVISE, or HOLD — plus a revision brief and a full audit transcript. Install once, use across every compatible agent harness via APM.
+version: 0.1.1
+description: Runtime-portable 5-agent quality gate for tier-1 text artifacts. Five role-conditioned LLM deliberators (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator) run in a 2-round async protocol with cross-read rebuttal. Returns one verdict — SHIP, REVISE, or HOLD — plus a revision brief and a full audit transcript. Each deliberator also ships as a standalone Skill, so any APM-compatible harness (Claude Code, Copilot CLI, Cursor, Cline, OpenCode) gets the methodology inline without the CLI. Install once, use across every compatible agent harness via APM.
 
 # Marketplace authoring: source of truth for .claude-plugin/marketplace.json.
 # Regenerate the JSON with `apm pack` (https://github.com/microsoft/apm).
@@ -10,10 +10,10 @@ marketplace:
     url: https://github.com/Avyayalaya
   packages:
     - name: agent-council
-      description: Multi-agent quality gate that adjudicates text artifacts before they ship. 5 role-conditioned LLM deliberators, 2-round async + cross-read rebuttal, structured SHIP/REVISE/HOLD verdict with revision brief. Bundled MCP server + slash commands. 4 runtime adapters (claude_cli, lmstudio, ollama, mock_cli). No SDK, no API keys, no vendor lock-in.
+      description: Multi-agent quality gate that adjudicates text artifacts before they ship. 5 role-conditioned LLM deliberators, 2-round async + cross-read rebuttal, structured SHIP/REVISE/HOLD verdict with revision brief. Ships 5 deliberator-as-Skills (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator) for interactive single-perspective review in any APM harness, plus bundled MCP server + Claude Code slash commands for automated full-Council review. 4 LLM runtime adapters (claude_cli, lmstudio, ollama, mock_cli). No SDK, no API keys, no vendor lock-in.
       source: ./
       homepage: https://github.com/Avyayalaya/agent-council
-      version: 0.1.0
+      version: 0.1.1
       license: MIT
       keywords:
         - quality-gate
@@ -24,4 +24,22 @@ marketplace:
         - agent-orchestration
         - review
         - claude-code
+        - copilot-cli
+        - skills
         - mcp
+      skills:
+        - name: skeptic-review
+          path: skills/skeptic-review
+          description: Adversarial steelman — surface load-bearing claims, the strongest unaddressed counter-position, top 3 specific failure modes, and causality/correlation gaps.
+        - name: voice-identity-review
+          path: skills/voice-identity-review
+          description: Line-level voice audit + CXO test + channel register match — requires operator voice corpus in context.
+        - name: evidence-calibration-review
+          path: skills/evidence-calibration-review
+          description: Per-claim T1-T6 evidence-tier audit + calibration check (over-claiming and under-claiming) + P11/P17/P54 pattern detection.
+        - name: strategy-stakes-review
+          path: skills/strategy-stakes-review
+          description: Goal-fit + opportunity cost + kill-criteria check + identity coherence — requires canonical goals framework in context.
+        - name: adjudicator-synthesis
+          path: skills/adjudicator-synthesis
+          description: "[SYNTHESIS, NOT A DELIBERATOR] Consumes the structured outputs of 2 or more deliberator Skills and synthesizes them into a SHIP / REVISE / HOLD verdict with revision brief. Returns INCOMPLETE if loaded on a raw artifact without prior deliberator outputs in context. Load at least 2 deliberator Skills first."

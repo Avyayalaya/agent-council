@@ -1,18 +1,41 @@
 {
   "name": "agent-council",
-  "description": "Runtime-portable 5-agent quality gate for tier-1 artifacts — installable as a Claude Code plugin",
+  "description": "Runtime-portable 5-agent quality gate for tier-1 artifacts — installable as a Claude Code plugin or via APM in any compatible harness (Claude Code, Copilot CLI, Cursor, Cline, OpenCode).",
   "owner": {
     "name": "Parth Sangani"
   },
   "plugins": [
     {
       "name": "agent-council",
-      "description": "Quality-gate any text artifact through 5 role-conditioned LLM deliberators (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator). 2-round async + cross-read. Returns SHIP/REVISE/HOLD + revision brief. Slash commands wrap the Python CLI.",
-      "version": "0.1.0",
+      "description": "Quality-gate any text artifact through 5 role-conditioned LLM deliberators (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator). 2-round async + cross-read. Returns SHIP/REVISE/HOLD + revision brief. v0.1.1 adds 5 deliberator-as-Skills for interactive single-perspective review in any APM harness alongside the existing Claude Code slash commands + MCP server.",
+      "version": "0.1.1",
       "source": "./",
       "author": {
         "name": "Parth Sangani"
-      }
+      },
+      "skills": [
+        {
+          "name": "skeptic-review",
+          "path": "skills/skeptic-review"
+        },
+        {
+          "name": "voice-identity-review",
+          "path": "skills/voice-identity-review"
+        },
+        {
+          "name": "evidence-calibration-review",
+          "path": "skills/evidence-calibration-review"
+        },
+        {
+          "name": "strategy-stakes-review",
+          "path": "skills/strategy-stakes-review"
+        },
+        {
+          "name": "adjudicator-synthesis",
+          "path": "skills/adjudicator-synthesis",
+          "description": "[SYNTHESIS, NOT A DELIBERATOR] Synthesizes 2+ deliberator-skill outputs into a SHIP/REVISE/HOLD verdict. Load at least 2 of skeptic-review, voice-identity-review, evidence-calibration-review, strategy-stakes-review first."
+        }
+      ]
     }
   ]
 }

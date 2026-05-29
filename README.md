@@ -66,6 +66,49 @@ Add to your client's MCP config:
 
 Tool exposed: `council_review(artifact_path, tier=1)`. Full setup: [mcp/README.md](mcp/README.md). `council_sweep` and `council_audit` tools land in v0.1.2.
 
+### Copilot CLI, Cursor, Cline, OpenCode (via APM Skills)
+
+`v0.1.1` ships each deliberator as a standalone Skill under [`skills/`](skills/) so any APM-compatible harness gets the methodology inline — no Python CLI required for single-perspective review.
+
+```bash
+apm marketplace add Avyayalaya/agent-council
+apm install agent-council --target copilot
+```
+
+Then in the harness, load one Skill at a time:
+
+- [`skeptic-review`](skills/skeptic-review/) — adversarial steelman pass
+- [`voice-identity-review`](skills/voice-identity-review/) — line-level voice audit + CXO test
+- [`evidence-calibration-review`](skills/evidence-calibration-review/) — per-claim T1-T6 evidence-tier audit
+- [`strategy-stakes-review`](skills/strategy-stakes-review/) — goal-fit and opportunity-cost check
+- [`adjudicator-synthesis`](skills/adjudicator-synthesis/) — verdict synthesis from 2+ deliberator outputs
+
+Use cases per surface:
+
+| Use case | Surface |
+|---|---|
+| Run full automated Council on an artifact with parallel deliberators + 2-round cross-read + JSONL audit | `python -m agent_council review path/to/artifact.md --tier=1` or MCP `council_review` tool |
+| Apply one deliberator role to a doc I am editing right now (Copilot, Claude, Cursor) | Load the matching Skill |
+| Compose 2 or 3 deliberators ad-hoc for a multi-angle ad-hoc review | Load multiple Skills sequentially, then optionally load `adjudicator-synthesis` |
+| Use slash commands in Claude Code | `/council-review path/to/artifact.md` (Claude Code only) |
+
+### Skills vs CLI — what you get on each path
+
+The Skills are the **interactive** single-perspective surface. The CLI / MCP is the **automated** full-Council surface. They share the same 5-deliberator methodology but trade differently:
+
+| Capability | Compose Skills sequentially | Full Council via CLI / MCP |
+|---|:---:|:---:|
+| One perspective at a time | yes | yes (the deliberators) |
+| Parallel deliberator execution | no | yes |
+| Round 2 cross-read rebuttal (each deliberator sees the other 3 R1 critiques) | no | yes |
+| Adjudicator prior-verdict compounding loop on `artifact_type` | no | yes |
+| JSONL audit log, replayable | no | yes |
+| Reproducible verdict across runs | no | yes |
+| Cost per review | 1 LLM call per Skill | ~9 LLM calls (4 deliberators × 2 rounds + Adjudicator) |
+| Sweet spot | Ad-hoc 1 or 2 perspectives on a doc you are editing | Pre-ship gating in pipelines; reproducible audit trail |
+
+Composing 5 Skills sequentially produces 5 independent critiques. That is useful for ad-hoc multi-angle review, but it is not the same artifact as the automated Council. If you need parallel execution, cross-read rebuttal, or a reproducible JSONL verdict, use the CLI / MCP path.
+
 ### Any other LLM (ChatGPT, Gemini, manual)
 
 Read the 5 prompts at [`prompts/`](prompts/). Each is self-contained and explains what the deliberator should produce. Run them in your tool of choice, then merge the verdicts using the policy in [`src/agent_council/verdict.py`](src/agent_council/verdict.py).
