@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Companion paper released to arXiv
 - BibTeX appendix with verified citations
 
+## [0.1.4] — 2026-07-15
+
+### Fixed
+
+- The bundled `.mcp.json` now sets `COUNCIL_CONFIG` to the shipped `council.yaml.example`. Plugin installs can call `council_review` without passing `config=` on every invocation or creating a separate `council.yaml` first.
+
 ## [0.1.3] — 2026-06-09
 
 ### Fixed

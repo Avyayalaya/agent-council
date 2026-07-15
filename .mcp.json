@@ -2,7 +2,10 @@
   "mcpServers": {
     "agent-council": {
       "command": "python",
-      "args": ["${PLUGIN_ROOT}/mcp/agent_council_mcp_server.py"]
+      "args": ["${PLUGIN_ROOT}/mcp/agent_council_mcp_server.py"],
+      "env": {
+        "COUNCIL_CONFIG": "${PLUGIN_ROOT}/council.yaml.example"
+      }
     }
   }
 }

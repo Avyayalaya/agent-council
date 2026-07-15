@@ -8,7 +8,7 @@
     {
       "name": "agent-council",
       "description": "Quality-gate any text artifact through 5 role-conditioned LLM deliberators (Skeptic, Voice & Identity, Evidence & Calibration, Strategy & Stakes, Adjudicator). 2-round async + cross-read. Returns SHIP/REVISE/HOLD + revision brief. v0.1.1 adds 5 deliberator-as-Skills for interactive single-perspective review in any APM harness alongside the existing Claude Code slash commands + MCP server.",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "source": "./",
       "author": {
         "name": "Parth Sangani"
