@@ -11,15 +11,37 @@ Run the Agent Council against a text artifact. Five role-conditioned deliberator
 Before running this command, confirm:
 
 - The `agent-council` Python package is installed (`pip install agent-council` or `pip install -e <local-clone>`).
-- A `council.yaml` exists in the working directory or a parent. If not, copy from `council.yaml.example` and edit:
-  - Set `runtime.type` to your installed LLM CLI (`claude_cli`, `lmstudio`, `ollama`, `mock_cli`).
-  - Point `context_refs` at your voice corpus and goals doc (templates in `examples/`).
+- A council config exists for the chosen team (see **Team selection** below). If none exists, the command runs from the shipped `*.yaml.example` template, so no setup is required to get started. To customize, copy the example to the real filename and edit:
+  - Set `runtime.type` to your installed LLM CLI (`copilot_cli`, `claude_cli`, `lmstudio`, `ollama`, `mock_cli`).
+  - Point `context_refs` at your corpora (templates in `examples/`).
+
+## Team selection
+
+This command takes a **required team name** that selects which council roster runs. The Skeptic, Evidence, and Adjudicator seats are shared by every team; each team re-casts the other two seats:
+
+| Team name | Aliases | Config (preferred → fallback) |
+|---|---|---|
+| `general` | `default`, `writing` | `council.yaml` → `council.yaml.example` |
+| `software` | `py`, `python`, `code` | `council.software.yaml` → `council.software.yaml.example` |
+| `go` | `golang` | `council.go.yaml` → `council.go.yaml.example` |
+
+**Resolving the config for the chosen team:** prefer the copied/customized `council.<team>.yaml`; if it does not exist, fall back to `council.<team>.yaml.example`. For `general`, that is `council.yaml` → `council.yaml.example`. If neither file exists, tell the user which one to create — do not silently substitute another team.
 
 ## Invocation
 
-If the user mentions a file path: run `python -m agent_council review <path> --tier=1 --config=council.yaml`.
+Parse two things from the user's request: a **file path** and a **team name**.
 
-If they say "this file" or "current artifact" without naming one: ask which file they mean. Do not assume.
+- **No team named** → ask which team they want, listing the three names (`general`, `software`, `go`). Do not assume a default.
+- **Unknown team named** (e.g. `rust`) → list the valid team names above; do not guess.
+- **`this file` / `current artifact` without a path** → ask which file they mean. Do not assume.
+
+Once you have both, resolve the config per the table above and run:
+
+```bash
+python -m agent_council review <path> --tier=1 --config=<resolved-config>
+```
+
+For example, `/council-review pkg/foo.go go` resolves to `council.go.yaml` (or `council.go.yaml.example`) and runs `python -m agent_council review pkg/foo.go --tier=1 --config=council.go.yaml`.
 
 Always run with `--tier=1` unless the user explicitly says otherwise — that's the tier this command is for.
 

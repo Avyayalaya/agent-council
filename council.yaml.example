@@ -4,7 +4,7 @@
 #   1. Copy to council.yaml in your project (the real config is gitignored).
 #   2. Supply your own voice / identity corpus at ./examples/voice_recipe.example.md
 #   3. Supply your own goals / north-star doc at ./examples/life_goals.example.md
-#   4. Adjust `runtime.type` to your installed CLI (claude_cli | mock_cli | lmstudio | ollama).
+#   4. Adjust `runtime.type` to your installed CLI (claude_cli | copilot_cli | mock_cli | lmstudio | ollama).
 #   5. Tune `tier_rules` to your artifact-naming conventions.
 #
 # Then run:
@@ -18,7 +18,7 @@ version: "1.0"
 # Runtime — which CLI binary the Council shells out to.
 # ---------------------------------------------------------------------------
 runtime:
-  type: claude_cli            # claude_cli | mock_cli | lmstudio | ollama | gh_models
+  type: claude_cli            # claude_cli | copilot_cli | mock_cli | lmstudio | ollama | gh_models
   binary: claude              # PATH-resolvable binary name
   model: sonnet               # undated alias the claude CLI always resolves (works on
                               # a fresh install regardless of tier). Pin a specific or
@@ -59,6 +59,30 @@ runtime:
 #   flags: []
 #   invocation_pattern: stdin
 #   timeout_seconds: 600
+#
+# ---------------------------------------------------------------------------
+# GitHub Copilot CLI (subprocess, prompt as arg) — drive the Council with the
+# `copilot` CLI. Install it and authenticate (`copilot` once interactively, or
+# a GH_TOKEN / gh auth login) so non-interactive calls resolve credentials.
+# ---------------------------------------------------------------------------
+# runtime:
+#   type: copilot_cli
+#   binary: copilot
+#   model: auto                 # "auto" lets Copilot pick; or pin a model id
+#   # Flags matter here:
+#   #   -s                       clean, script-friendly stdout (answer only)
+#   #   --no-color               strip ANSI so output is plain text
+#   #   --no-custom-instructions CRITICAL — otherwise this repo's AGENTS.md
+#   #                            (which describes the Council) is injected into
+#   #                            every deliberator call and pollutes critiques
+#   #   --disable-builtin-mcps   avoid MCP startup latency
+#   #   --allow-all-tools        Copilot's documented requirement for
+#   #                            non-interactive mode; prevents TTY blocking.
+#   #                            For a strictly read-only gate, replace it with
+#   #                            `--deny-tool=shell` and `--deny-tool=write`.
+#   flags: [-s, --no-color, --no-custom-instructions, --disable-builtin-mcps, --allow-all-tools]
+#   invocation_pattern: args    # prompt is passed via -p, NOT stdin
+#   timeout_seconds: 600        # each call is a full agent turn; 9 calls per run
 
 # ---------------------------------------------------------------------------
 # Deliberators — the 4 critics running in parallel.

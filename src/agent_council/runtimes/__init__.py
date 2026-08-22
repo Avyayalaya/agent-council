@@ -8,6 +8,7 @@ Adding a new runtime = one new file in this directory + a `type:` registry entry
 
 from agent_council.runtimes.base import RuntimeAdapter
 from agent_council.runtimes.claude_cli import ClaudeCLIAdapter
+from agent_council.runtimes.copilot_cli import CopilotCLIAdapter
 from agent_council.runtimes.gh_models import GhModelsAdapter
 from agent_council.runtimes.lmstudio import LMStudioAdapter
 from agent_council.runtimes.mock_cli import MockCLIAdapter
@@ -29,6 +30,8 @@ def build_adapter(runtime_config: dict) -> RuntimeAdapter:
     rt = (runtime_config.get("type") or "").lower()
     if rt == "claude_cli":
         return ClaudeCLIAdapter(runtime_config)
+    if rt == "copilot_cli":
+        return CopilotCLIAdapter(runtime_config)
     if rt == "mock_cli":
         return MockCLIAdapter(runtime_config)
     if rt == "ollama":
@@ -39,7 +42,7 @@ def build_adapter(runtime_config: dict) -> RuntimeAdapter:
         return LMStudioAdapter(runtime_config)
     raise ValueError(
         f"Unknown runtime type: {rt!r}. "
-        f"Known: claude_cli, mock_cli, ollama, gh_models, lmstudio. "
+        f"Known: claude_cli, copilot_cli, mock_cli, ollama, gh_models, lmstudio. "
         f"Add a new adapter to src/agent_council/runtimes/ and register it here."
     )
 
@@ -47,6 +50,7 @@ def build_adapter(runtime_config: dict) -> RuntimeAdapter:
 __all__ = [
     "RuntimeAdapter",
     "ClaudeCLIAdapter",
+    "CopilotCLIAdapter",
     "GhModelsAdapter",
     "LMStudioAdapter",
     "MockCLIAdapter",

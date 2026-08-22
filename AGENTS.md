@@ -157,6 +157,7 @@ python -m agent_council validate-config <path>
 | Adapter | When to use | Health check | Notes |
 |---------|-------------|--------------|-------|
 | `claude_cli` | Production gating with Anthropic's CLI | `claude --version` exits 0 | UTF-8 explicit; Windows-safe |
+| `copilot_cli` | Production gating with GitHub Copilot CLI | `copilot --version` exits 0 | Non-interactive `-p`; prompt passed as arg; `-s --no-custom-instructions --allow-all-tools` |
 | `mock_cli` | Tests, demos, offline development | Always True | Deterministic canned output |
 
 Adding a new adapter (e.g., `ollama`, `copilot_cli`): one file under `src/agent_council/runtimes/`, subclass `RuntimeAdapter`, implement `invoke` / `health_check` / `adapter_name`, register in `runtimes/__init__.py:build_adapter`. No orchestrator changes required.

@@ -1,0 +1,171 @@
+# council.software.yaml.example — copy-and-go config for reviewing CODE artifacts
+#
+# This is the software-engineering variant of council.copilot.yaml.example. The
+# `copilot_cli` runtime is already active, and two of the four deliberators are
+# repurposed for a coding council (tuned here for Python / Flask / pytest):
+#
+#   * `voice_identity`  runs as **Code Quality & Conventions** (prompts/code_quality.md)
+#   * `strategy`        runs as **Architecture & Scope**       (prompts/architecture.md)
+#
+# The slot ids are intentionally kept as `voice_identity` / `strategy` for
+# schema compatibility (src/agent_council/schema.py keys required fields on
+# these ids), so no source or test changes are needed — only the prompt and the
+# context corpus differ. Logs will still label the slots `voice_identity` /
+# `strategy`; the acting role is documented in each prompt's front matter.
+#
+# To use it:
+#   1. Copy to council.yaml in your project (the real config is gitignored).
+#   2. Install + authenticate the `copilot` CLI (run `copilot` once
+#      interactively, or export a GH_TOKEN / run `gh auth login`).
+#   3. Copy the two corpora templates and edit them for YOUR codebase:
+#        cp examples/code_standards.example.md    code_standards.md
+#        cp examples/engineering_goals.example.md engineering_goals.md
+#      then point the context_refs below at your copies (or edit the examples
+#      in place). The shipped templates encode Python/Flask/pytest rules — swap
+#      in your language's conventions, principles, non-goals, and kill-criteria.
+#   4. Tune `tier_rules` / `watch.paths` to your source + design-doc layout.
+#
+# Then run:
+#   python -m agent_council review path/to/design.md --tier=1 --config=council.yaml
+#
+# Every section is documented inline. Comments mark the fields you typically edit.
+
+version: "1.0"
+
+# ---------------------------------------------------------------------------
+# Runtime — GitHub Copilot CLI (subprocess, prompt passed as an arg).
+# ---------------------------------------------------------------------------
+runtime:
+  type: copilot_cli           # claude_cli | copilot_cli | mock_cli | lmstudio | ollama | gh_models
+  binary: copilot             # PATH-resolvable binary name
+  model: auto                 # "auto" lets Copilot pick; or pin a model id
+  # Flags matter here:
+  #   -s                       clean, script-friendly stdout (answer only)
+  #   --no-color               strip ANSI so output is plain text
+  #   --no-custom-instructions CRITICAL — otherwise this repo's AGENTS.md
+  #                            (which describes the Council) is injected into
+  #                            every deliberator call and pollutes critiques
+  #   --disable-builtin-mcps   avoid MCP startup latency
+  #   --allow-all-tools        Copilot's documented requirement for
+  #                            non-interactive mode; prevents TTY blocking.
+  #                            For a strictly read-only gate, replace it with
+  #                            `--deny-tool=shell` and `--deny-tool=write`.
+  flags: [-s, --no-color, --no-custom-instructions, --disable-builtin-mcps, --allow-all-tools]
+  invocation_pattern: args    # prompt is passed via -p, NOT stdin
+  timeout_seconds: 600        # each call is a full agent turn; 9 calls per run
+
+# Prefer a different backend? See council.yaml.example for ready-to-edit
+# claude_cli, lmstudio, ollama, and gh_models blocks. Pick exactly one runtime.
+
+# ---------------------------------------------------------------------------
+# Deliberators — the 4 critics running in parallel.
+# Each deliberator gets a role-specific prompt and optional context_refs.
+# ---------------------------------------------------------------------------
+deliberators:
+  - id: skeptic
+    prompt: ./prompts/skeptic.md          # domain-neutral: finds the strongest failure mode
+    weight: 1.0
+
+  # SOFTWARE REFRAME: slot id kept as `voice_identity` (schema compatibility),
+  # but it runs as the Code Quality & Conventions critic.
+  - id: voice_identity
+    prompt: ./prompts/code_quality.md
+    weight: 1.0
+    context_refs:
+      # Coding-standards corpus (rules + banned patterns the critic cites
+      # line-level violations against). Copy examples/code_standards.example.md
+      # to code_standards.md and edit for your codebase, or point here directly.
+      - ./examples/code_standards.example.md
+
+  - id: evidence
+    prompt: ./prompts/evidence.md         # domain-neutral: per-claim evidence-tier audit
+    weight: 1.0
+
+  # SOFTWARE REFRAME: slot id kept as `strategy` (schema compatibility), but it
+  # runs as the Architecture & Scope critic.
+  - id: strategy
+    prompt: ./prompts/architecture.md
+    weight: 1.0
+    context_refs:
+      # Engineering-goals corpus (north-star, objectives, architectural
+      # principles, non-goals, kill-criteria). Copy
+      # examples/engineering_goals.example.md to engineering_goals.md and edit.
+      - ./examples/engineering_goals.example.md
+
+# ---------------------------------------------------------------------------
+# Adjudicator — the synthesizer. Single call after R1 + R2.
+# ---------------------------------------------------------------------------
+adjudicator:
+  prompt: ./prompts/adjudicator.md
+  verdict_policy:
+    # Score-aware policy — the 1-5 calibration score is load-bearing, not
+    # decorative. Logic in src/agent_council/verdict.py:VerdictPolicy.apply.
+    ship_min_score: 3      # SHIP requires 0 hard blocks AND every R2 score >= this
+    soft_block_score: 1    # an R2 score <= this is a SOFT BLOCK (counts toward HOLD)
+    hold_block_count: 3    # HOLD when (hard + soft) blocks reach this, or any 'irreducible'
+    # Resulting behaviour at the defaults above:
+    #   ship:   0 hard blocks AND all R2 scores >= 3
+    #   revise: a score of 2, OR 1-2 (hard|soft) blocks, with no irreducible
+    #   hold:   3+ (hard|soft) blocks, OR any 'irreducible' flag
+
+# ---------------------------------------------------------------------------
+# Protocol — round mechanics.
+# ---------------------------------------------------------------------------
+protocol:
+  rounds: 2                          # 1 = independent only, 2 = with cross-read rebuttal
+  cross_read: true                   # R2 sees other deliberators' R1
+  fail_fast_on_runtime_error: false  # one deliberator failing != Council failing
+  min_deliberators_for_verdict: 3    # below this, verdict = INCOMPLETE
+
+# ---------------------------------------------------------------------------
+# Tier classification — which artifacts the Council reviews.
+# ---------------------------------------------------------------------------
+tier_classifier:
+  type: rules                        # rules | model | hybrid (v1: rules only)
+  default_tier: 2                    # unclassified artifacts skip Council
+
+# Inline rules — tuned for a software repo (design docs, specs, plans, source).
+# Keys are artifact_type labels (used in council_log.jsonl for compounding memory).
+tier_rules:
+  tier_1:
+    design_doc:
+      - "**/design.md"
+      - "**/*_design.md"
+    spec:
+      - "**/spec.md"
+      - "**/requirements.md"
+    plan:
+      - "**/plan.md"
+      - "**/plans/**/*.md"
+    adr:
+      - "**/adr/*.md"
+      - "**/*.adr.md"
+  tier_3:
+    # Tier 3 fires on a 1-in-5 sample (deterministic hash).
+    source:
+      - "**/*.py"
+    migration:
+      - "**/migrations/*.py"
+
+# ---------------------------------------------------------------------------
+# Logging — where verdicts are persisted.
+# ---------------------------------------------------------------------------
+logging:
+  log_path: ./council_log.jsonl
+  archive_dir: ./council_archive
+  log_format: rule_35_v2             # rule_35_v2 | generic_json | none
+  redact_patterns: []                # regex patterns to scrub from logs
+
+# ---------------------------------------------------------------------------
+# Watch — paths the daily-sweep subcommand walks.
+# Replace these with your source + design-doc directories.
+# ---------------------------------------------------------------------------
+watch:
+  paths:
+    - ./src/
+    - ./plans/
+    - ./docs/
+  tier_overrides:
+    "**/design.md": 1
+    "**/spec.md": 1
+    "**/plans/**/*.md": 1
