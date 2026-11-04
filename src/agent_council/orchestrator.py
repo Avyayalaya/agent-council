@@ -86,6 +86,8 @@ class Council:
         self,
         config: dict[str, Any],
         config_dir: Path | None = None,
+        *,
+        adapter: RuntimeAdapter | None = None,
     ) -> None:
         """Initialize Council from a parsed ``council.yaml`` dict.
 
@@ -93,10 +95,14 @@ class Council:
             config: parsed council.yaml as nested dicts/lists/scalars.
             config_dir: directory where prompt paths resolve from. Defaults
                 to current working directory.
+            adapter: caller-owned runtime; when supplied, skips configured
+                runtime construction. The caller must honor RuntimeAdapter.
         """
         self.config = config
         self.config_dir = config_dir or Path.cwd()
-        self.adapter: RuntimeAdapter = build_adapter(config.get("runtime") or {})
+        self.adapter: RuntimeAdapter = (
+            adapter if adapter is not None else build_adapter(config.get("runtime") or {})
+        )
         self.policy = VerdictPolicy((config.get("adjudicator") or {}).get("verdict_policy"))
         log_cfg = config.get("logging") or {}
         log_path = log_cfg.get("log_path") or "./council_log.jsonl"
@@ -201,9 +207,7 @@ class Council:
         )
 
         # Assemble DeliberatorResult records.
-        # D5: schema_failed deliberators are treated as no_dissent per design F2.
-        # They keep their record (with the schema_failed flag in the log) but
-        # contribute zero blocks/irreducible to the verdict policy.
+        # Keep invalid raw evidence, but never count it toward the valid-R1 quorum.
         results: dict[str, DeliberatorResult] = {}
         for d in delibs_cfg:
             did = d["id"]
@@ -216,6 +220,9 @@ class Council:
                 role=did,
                 raw_r1=r1.get("payload") if r1 and r1.get("payload") is not None else None,
                 error=r1.get("error") if r1 else "no R1 result",
+                r1_schema_failed=r1_schema_failed,
+                r2_schema_failed=r2_schema_failed,
+                r2_error=r2.get("error") if r2 else None,
             )
             if r1 and r1.get("payload") and not r1_schema_failed:
                 payload = r1["payload"]
@@ -240,9 +247,6 @@ class Council:
                 esc = payload.get("escalations")
                 dr.r2_concessions = [str(x) for x in conc] if isinstance(conc, list) else []
                 dr.r2_escalations = [str(x) for x in esc] if isinstance(esc, list) else []
-            # If schema failed, raw_r1 is the parsed (but invalid) payload — leave
-            # it so the archive captures what was attempted, but the verdict
-            # policy sees no_dissent because r1_would_block defaults to False.
             results[did] = dr
 
         # Compute verdict via policy. Adjudicator's own verdict is used for
@@ -250,6 +254,7 @@ class Council:
         # SHIPs when deliberators would have blocked.
         policy_verdict, policy_reason = self.policy.apply(results, min_deliberators=min_delibs)
         adj_schema_failed = adj_schema_meta.get("schema_failed", False)
+        adj_error = adj_schema_meta.get("error")
         adj_verdict = (adj_payload or {}).get("verdict") if adj_payload else None
 
         # Merge policy + adjudicator verdicts via the extracted helper so the
@@ -257,18 +262,35 @@ class Council:
         final_verdict = merge_verdicts(
             policy_verdict=policy_verdict,
             adj_verdict=adj_verdict,
-            adj_schema_failed=adj_schema_failed,
+            adj_schema_failed=adj_schema_failed or bool(adj_error),
             results=results,
         )
 
-        reasoning = (adj_payload or {}).get("reasoning") or policy_reason
-        if adj_schema_failed:
+        reasoning, revision_brief = explain_verdict(
+            final_verdict, policy_verdict, policy_reason, adj_payload, results
+        )
+        if adj_schema_meta.get("runtime_error"):
+            reasoning = (
+                f"Adjudicator runtime failed: {adj_error}. "
+                "Verdict is INCOMPLETE; see the audit record and archived reviews."
+            )
+        elif adj_schema_failed:
             reasoning = (
                 "Adjudicator output failed schema validation after one re-prompt. "
                 "Verdict cannot be rendered. See council_log.jsonl for errors."
             )
-        revision_brief = (adj_payload or {}).get("revision_brief")
-        dissent_summary = (adj_payload or {}).get("dissent_summary") or ""
+        dissent_summary = "" if adj_error else (adj_payload or {}).get("dissent_summary") or ""
+        failures: list[str] = []
+        for did, result in results.items():
+            if result.error:
+                failures.append(f"- {did} R1 failed; excluded from quorum: {result.error}")
+            if result.r2_error:
+                fallback = "using valid R1" if result.succeeded else "no valid R1 fallback"
+                failures.append(f"- {did} R2 failed; {fallback}: {result.r2_error}")
+        if failures:
+            dissent_summary = "\n\n".join(filter(None, [
+                dissent_summary, "Review failures:\n" + "\n".join(failures),
+            ]))
         # Surface the deliberators' own R2 deltas from ground truth, not just
         # the Adjudicator's retelling (audit: cross-read was never consumed).
         r2_deltas = summarize_round2_changes(results)
@@ -283,6 +305,7 @@ class Council:
             deliberators=results,
             adjudicator_raw=adj_payload,
             span_id=span_id,
+            adjudicator_error=adj_error,
         )
 
         # Persist log + archive.
@@ -319,8 +342,8 @@ class Council:
         D5: each deliberator response is validated against its role+round
         schema. On schema failure, a single re-prompt is fired with a stricter
         format instruction. If the second attempt also fails, the result is
-        flagged schema_failed=True and treated as no_dissent for verdict
-        purposes (design v0.2 §9 F2).
+        flagged schema_failed=True. Invalid R1 does not count toward quorum;
+        invalid R2 falls back to a valid R1, if available.
 
         Args:
             delibs_cfg: list of deliberator config dicts.
@@ -346,9 +369,11 @@ class Council:
         fenced = fence_artifact(artifact_text)  # injection fencing — artifact is data
         tasks: list[asyncio.Task] = []
         ids: list[str] = []
+        partial_results: dict[str, dict[str, Any]] = {}
         for d in delibs_cfg:
             did = d["id"]
             ids.append(did)
+            partial_results[did] = {}
             prompt_text = prompts[did]
             ctx = [fenced, *contexts[did]]
             if r2_inputs is not None:
@@ -359,7 +384,8 @@ class Council:
             tasks.append(
                 asyncio.create_task(
                     self._invoke_with_schema(
-                        self.adapter, prompt_text, ctx, role=did, round_num=round_num
+                        self.adapter, prompt_text, ctx, role=did, round_num=round_num,
+                        partial_result=partial_results[did],
                     )
                 )
             )
@@ -368,14 +394,19 @@ class Council:
         results: dict[str, dict[str, Any]] = {}
         for did, outcome in zip(ids, gathered):
             if isinstance(outcome, Exception):
+                partial = partial_results[did]
                 results[did] = {
                     "payload": None,
                     "raw": "",
-                    "error": f"{type(outcome).__name__}: {outcome}",
-                    "schema_failed": True,
-                    "schema_errors": [f"adapter raised: {type(outcome).__name__}"],
                     "reprompts": 0,
                     "raw_retry": None,
+                    **partial,
+                    "error": f"{type(outcome).__name__}: {outcome}",
+                    "schema_failed": True,
+                    "schema_errors": [
+                        *partial.get("schema_errors", []),
+                        f"adapter raised: {type(outcome).__name__}",
+                    ],
                 }
             else:
                 results[did] = outcome
@@ -388,6 +419,8 @@ class Council:
         context: list[str],
         role: str,
         round_num: int,
+        *,
+        partial_result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Invoke one deliberator with schema validation + single re-prompt.
 
@@ -416,14 +449,30 @@ class Council:
         )
         retry_prompt = prompt_text + stricter_format_instruction(role, round_num, errors)
         raw_retry: str | None = None
+        if partial_result is not None:
+            # Preserve evidence for fan-out's failure path without catching programming errors.
+            partial_result.update(
+                raw=raw, payload=payload, schema_errors=errors, reprompts=MAX_REPROMPTS,
+            )
         try:
             raw_retry = await adapter.invoke(retry_prompt, context)
+            if partial_result is not None:
+                partial_result["raw_retry"] = raw_retry
             payload_retry = _extract_json_block(raw_retry)
             ok2, errors2 = schema_validate(payload_retry, role, round_num)
-        except Exception as e:  # F5.2 — re-prompt adapter exception
-            errors2 = [f"retry raised: {type(e).__name__}: {e}"]
-            ok2 = False
-            payload_retry = None
+        except (asyncio.TimeoutError, RuntimeError) as e:
+            error = f"retry raised: {type(e).__name__}: {e}"
+            print(f"[runtime] {role}/R{round_num} {error}", file=sys.stderr)
+            return {
+                "payload": payload,
+                "raw": raw,
+                "error": error,
+                "runtime_error": error,
+                "schema_failed": True,
+                "schema_errors": errors,
+                "reprompts": MAX_REPROMPTS,
+                "raw_retry": None,
+            }
 
         if ok2:
             return {
@@ -439,13 +488,13 @@ class Council:
         # Still invalid after one retry — flag schema_failed for verdict policy.
         print(
             f"[schema] {role}/R{round_num} failed AGAIN after re-prompt; "
-            f"treating as no_dissent. errors={errors2}",
+            f"output is unusable. errors={errors2}",
             file=sys.stderr,
         )
         return {
             "payload": payload_retry if payload_retry is not None else payload,
             "raw": raw,
-            "error": None,
+            "error": "Schema validation failed after one re-prompt: " + "; ".join(errors2),
             "schema_failed": True,
             "schema_errors": errors + errors2,
             "reprompts": MAX_REPROMPTS,
@@ -467,69 +516,39 @@ class Council:
 
         Returns:
             (raw_response, parsed_payload, schema_meta) where schema_meta
-            includes ``schema_failed``, ``schema_errors``, ``reprompts``,
-            ``raw_retry``, and ``prior_verdicts_count``.
+            includes ``error``, ``schema_failed``, ``schema_errors``,
+            ``reprompts``, ``raw_retry``, and ``prior_verdicts_count``.
         """
         pack_parts: list[str] = []
         if prior_verdicts:
             pack_parts.append(_format_prior_verdicts(prior_verdicts))
-        pack_parts.append(_format_adjudicator_pack(r1, r2))
+        proto = self.config.get("protocol") or {}
+        pack_parts.append(_format_adjudicator_pack(
+            r1, r2,
+            policy_description=self.policy.describe(int(proto.get("min_deliberators_for_verdict", 3))),
+        ))
         pack = "\n\n".join(pack_parts)
         ctx = [fence_artifact(artifact_text), pack]
 
-        raw = await self.adapter.invoke(prompt_text, ctx)
-        payload = _extract_json_block(raw)
-        ok, errors = schema_validate(payload, ROLE_ADJUDICATOR, 3)
-        if ok:
-            return raw, payload, {
+        try:
+            result = await self._invoke_with_schema(
+                self.adapter, prompt_text, ctx, ROLE_ADJUDICATOR, 3
+            )
+        except (asyncio.TimeoutError, RuntimeError) as e:
+            error = f"{type(e).__name__}: {e}"
+            print(f"[runtime] adjudicator/R3 failed: {error}", file=sys.stderr)
+            result = {
+                "raw": "",
+                "payload": None,
+                "error": error,
+                "runtime_error": error,
                 "schema_failed": False,
                 "schema_errors": [],
                 "reprompts": 0,
                 "raw_retry": None,
-                "prior_verdicts_count": len(prior_verdicts or []),
             }
-
-        # F5.5 — Adjudicator schema is permissive (only verdict + reasoning
-        # required). If it still fails, re-prompt once.
-        print(
-            f"[schema] adjudicator/R3 failed validation; re-prompting once. "
-            f"errors={errors}",
-            file=sys.stderr,
-        )
-        retry_prompt = prompt_text + stricter_format_instruction(
-            ROLE_ADJUDICATOR, 3, errors
-        )
-        raw_retry: str | None = None
-        try:
-            raw_retry = await self.adapter.invoke(retry_prompt, ctx)
-            payload_retry = _extract_json_block(raw_retry)
-            ok2, errors2 = schema_validate(payload_retry, ROLE_ADJUDICATOR, 3)
-        except Exception as e:
-            errors2 = [f"retry raised: {type(e).__name__}: {e}"]
-            ok2 = False
-            payload_retry = None
-
-        if ok2:
-            return raw, payload_retry, {
-                "schema_failed": False,
-                "schema_errors": errors,
-                "reprompts": 1,
-                "raw_retry": raw_retry,
-                "prior_verdicts_count": len(prior_verdicts or []),
-            }
-
-        print(
-            f"[schema] adjudicator/R3 failed AGAIN after re-prompt; "
-            f"verdict will be INCOMPLETE. errors={errors2}",
-            file=sys.stderr,
-        )
-        return raw, payload_retry if payload_retry is not None else payload, {
-            "schema_failed": True,
-            "schema_errors": errors + errors2,
-            "reprompts": MAX_REPROMPTS,
-            "raw_retry": raw_retry,
-            "prior_verdicts_count": len(prior_verdicts or []),
-        }
+        result["prior_verdicts_count"] = len(prior_verdicts or [])
+        return result["raw"], result["payload"], result
 
     # ------------------------------------------------------------------
     # Persistence
@@ -572,6 +591,8 @@ class Council:
             "deliberators": deliberators_dict,
             "adjudicator_reasoning": verdict.reasoning,
             "revision_brief": verdict.revision_brief,
+            "dissent_summary": verdict.dissent_summary,
+            "adjudicator_error": verdict.adjudicator_error,
             "adjudicator_schema_failed": bool(adjudicator_schema.get("schema_failed")),
             "adjudicator_reprompts": int(adjudicator_schema.get("reprompts", 0)),
             "prior_verdicts_used": int(prior_verdicts_used),
@@ -607,6 +628,8 @@ class Council:
                 adj_text = adj_text + "\n\n=== SCHEMA_RETRY ===\n\n" + (
                     adjudicator_schema.get("raw_retry") or ""
                 )
+            if verdict.adjudicator_error:
+                adj_text += "\n\n=== ADJUDICATOR_ERROR ===\n\n" + verdict.adjudicator_error
             (arch_dir / "adjudicator_synthesis.md").write_text(adj_text, encoding="utf-8")
         except OSError as e:
             # Archive failure should not fail the verdict; surface to stderr.
@@ -782,8 +805,8 @@ def merge_verdicts(
             SHIP, REVISE, HOLD, INCOMPLETE.
         adj_verdict: the Adjudicator's claimed verdict from its R3 synthesis;
             may be None or invalid if synthesis failed.
-        adj_schema_failed: True if the Adjudicator's output failed schema
-            validation even after one re-prompt.
+        adj_schema_failed: True if synthesis is unusable after schema validation
+            or a runtime failure (the historical parameter name is retained).
         results: mapping of role-id to DeliberatorResult — used to check
             ``r2_irreducible`` flags for the HOLD → REVISE downgrade.
 
@@ -804,6 +827,61 @@ def merge_verdicts(
         if not any_irreducible:
             final = "REVISE"
     return final
+
+
+def explain_verdict(
+    final_verdict: str,
+    policy_verdict: str,
+    policy_reason: str,
+    adj_payload: dict[str, Any] | None,
+    results: dict[str, DeliberatorResult],
+) -> tuple[str, str | None]:
+    """Explain enforcement without presenting an overridden approval as the decision."""
+    payload = adj_payload or {}
+    recommendation = payload.get("verdict")
+    reasoning = payload.get("reasoning") or policy_reason
+    if final_verdict != recommendation:
+        reasoning = (
+            f"Final verdict {final_verdict} overrides the Adjudicator recommendation "
+            f"{recommendation or 'unavailable'}. Policy: {policy_reason}"
+        )
+    elif final_verdict != policy_verdict:
+        action = (
+            "The non-irreducible HOLD-to-REVISE exception applies."
+            if policy_verdict == "HOLD" and final_verdict == "REVISE"
+            else "The Adjudicator escalated the policy verdict."
+        )
+        reasoning = (
+            f"Final verdict {final_verdict}; policy recommended {policy_verdict}. "
+            f"{action} Adjudicator reasoning: {reasoning}"
+        )
+
+    if final_verdict not in ("REVISE", "HOLD"):
+        return reasoning, None
+    brief = payload.get("revision_brief")
+    if isinstance(brief, str) and brief.strip():
+        return reasoning, brief
+
+    findings: list[str] = []
+    for role, result in results.items():
+        if not result.succeeded:
+            continue
+        findings.extend(f"{role} (R1): {issue}" for issue in result.top_issues)
+        findings.extend(f"{role} (R2 escalation): {issue}" for issue in result.r2_escalations)
+    brief = "No actionable revision brief was supplied. "
+    if findings:
+        brief += (
+            "Use these recorded findings to determine the required changes; "
+            "R1 findings may have been revised in R2:\n"
+            + "\n".join(f"{i}. {finding}" for i, finding in enumerate(findings, 1))
+            + "\nConsult the archived critiques for the complete context."
+        )
+    else:
+        brief += (
+            "Specific reviewer findings are also unavailable. Required changes remain "
+            "unresolved; inspect the archived critiques before proceeding."
+        )
+    return reasoning, brief
 
 
 # Cache for the host-system root walk (idempotent per process).
@@ -929,11 +1007,16 @@ def _format_prior_verdicts(prior: list[dict[str, Any]]) -> str:
 def _format_adjudicator_pack(
     r1: dict[str, dict[str, Any]],
     r2: dict[str, dict[str, Any]],
+    *,
+    policy_description: str | None = None,
 ) -> str:
     """Render the full R1+R2 transcript the Adjudicator synthesizes from."""
     parts = ["# === Round 1 critiques ===\n"]
     for did, r in r1.items():
         parts.append(f"\n## R1: {did}\n")
+        if r.get("error"):
+            parts.append(f"_(R1 failed; excluded from quorum: {r['error']})_\n")
+            continue
         if r.get("payload"):
             parts.append("```json\n" + json.dumps(r["payload"], indent=2, ensure_ascii=False) + "\n```\n")
         else:
@@ -941,15 +1024,17 @@ def _format_adjudicator_pack(
     parts.append("\n# === Round 2 rebuttals ===\n")
     for did, r in r2.items():
         parts.append(f"\n## R2: {did}\n")
+        if r.get("error"):
+            parts.append(f"_(R2 failed; use valid R1 if available: {r['error']})_\n")
+            continue
         if r.get("payload"):
             parts.append("```json\n" + json.dumps(r["payload"], indent=2, ensure_ascii=False) + "\n```\n")
         else:
             parts.append(r.get("raw", "") + "\n")
+    parts.append("\n# === Verdict policy ===\n")
+    parts.append(policy_description if policy_description is not None else VerdictPolicy().describe())
     parts.append(
-        "\n# === Verdict policy ===\n"
-        "- SHIP   = 0 deliberators would_block after R2\n"
-        "- REVISE = 1-2 would_block AND no irreducible\n"
-        "- HOLD   = 3+ would_block OR any irreducible\n\n"
+        "\n"
         "Respond ONLY with JSON in a fenced code block, with fields: "
         "verdict, reasoning, revision_brief (null if SHIP), dissent_summary.\n"
     )

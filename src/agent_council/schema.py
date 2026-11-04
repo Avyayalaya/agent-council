@@ -3,8 +3,9 @@
 The Council protocol expects each deliberator and the Adjudicator to return a
 JSON payload with a known shape. If a payload is malformed (missing keys, wrong
 types, out-of-range scores), the orchestrator re-prompts once with stricter
-format instructions; if the re-prompt still fails, the result is treated as
-no_dissent for verdict purposes and the failure is flagged in the log.
+format instructions; if the re-prompt still fails, that round is unusable.
+Invalid R1 does not count toward quorum. Failed R2 can fall back to a valid
+R1. Failures are exposed in the verdict and audit log, with raw evidence archived.
 
 This module exposes:
 

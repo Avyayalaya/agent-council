@@ -6,58 +6,53 @@ nav_order: 2
 
 # Architecture
 
-How the 5-deliberator council works.
+Four reviewers, a separate Adjudicator, and an enforced verdict policy.
 {: .fs-6 .fw-300 }
 
 ---
 
 ## The 2-round protocol
 
+```text
+Artifact + role-specific context
+  -> R1: Skeptic / Evidence / Voice / Strategy, independent parallel reviews
+  -> R2: full available R1 findings shared, including each reviewer's own
+  -> Adjudicator: artifact + both rounds + prior same-type verdict summaries
+  -> Policy enforcement: SHIP / REVISE / HOLD / INCOMPLETE
+  -> Decision, revision brief or explicit limitation, audit row and transcripts
 ```
-   ┌──────────┐
-   │ artifact │ ───► tier-1?  No  ───► skip
-   └────┬─────┘        │
-        │ Yes
-        ▼
-   ┌────────────────────────────────────────────────────────┐
-   │  ROUND 1 — 4 deliberators run in parallel              │
-   │                                                        │
-   │   Skeptic        Voice &      Evidence &     Strategy  │
-   │   (adversarial)  Identity     Calibration    & Stakes  │
-   │                                                        │
-   │   each → {verdict, scores, would_block, irreducible,   │
-   │           revision_brief}                              │
-   └─────────────────────────────┬──────────────────────────┘
-                                 │
-                                 ▼
-   ┌────────────────────────────────────────────────────────┐
-   │  ROUND 2 — same 4 deliberators, with cross-read        │
-   │                                                        │
-   │   Each sees the other 3 R1 verdicts; may update.       │
-   │   Single-deliberator misfires get corrected; indep-    │
-   │   endent first reads preserved.                        │
-   └─────────────────────────────┬──────────────────────────┘
-                                 │
-                                 ▼
-   ┌────────────────────────────────────────────────────────┐
-   │  ADJUDICATOR (single call)                             │
-   │                                                        │
-   │   Merges 4 R2 verdicts + reads prior verdicts on same  │
-   │   artifact_type from council_log.jsonl (D6 loop).      │
-   │                                                        │
-   │   Verdict policy:                                      │
-   │     3+ block on irreducible       → HOLD               │
-   │     3+ block on reducible +                            │
-   │       Adjudicator reasons downgrade → REVISE           │
-   │     otherwise                       → SHIP             │
-   │                                  + revision_brief      │
-   └─────────────────────────────┬──────────────────────────┘
-                                 │
-                                 ▼
-                      SHIP / REVISE / HOLD
-                      + revision_brief
-                      + audit row → council_log.jsonl
-```
+
+R1 preserves distinct starting perspectives. R2 can expose new questions across responsibilities: whether a stronger-sounding claim was measured, whether the evidence supports causation, or whether an assumption changes the strategic recommendation. It is one cross-read round, not a continuous debate or a vote to force consensus. The output preserves reviewer concessions and escalations alongside the synthesis.
+
+The Adjudicator has no R1 position of its own to defend. It groups related findings, explains useful disagreement and recommends required changes. The runtime separately enforces its verdict policy. `rounds: 1` omits R2; a later review of a revised artifact is a new caller-initiated run.
+
+The [personal workflow diagram](assets/ai-review-loop-v1.0.png), **How I use AI to review my work**, covers authored, AI-generated and co-created content. Its stricter "required reviews complete" standard is not the runtime default: three valid R1 reviews may suffice, with R1 fallback when R2 fails. The image is a workflow illustration, not an exact executable state machine or automatic publication authority.
+
+## Completion, failures and stopping
+
+Only schema-valid R1 reviews count toward `min_deliberators_for_verdict` (default 3). An invalid R1 object cannot count merely because it parsed as JSON, and valid R2 cannot repair that R1 quorum failure. For a participating reviewer, valid R2 flags/scores take precedence; missing/failed R2 uses valid R1.
+
+Each malformed output gets at most one schema reprompt. Runtime errors do not trigger extra retries. An initial synthesis timeout/runtime failure, a runtime failure during its schema retry, or exhausted synthesis schema validation returns `INCOMPLETE` with an error and available review transcripts. No strict all-four/all-round completeness rule is added.
+
+The verdict exposes R1 `error`, `r1_schema_failed`, `r2_error`, `r2_schema_failed`, and top-level `adjudicator_error`. R2 failure does not change `succeeded` when R1 is valid. Human-readable dissent also names failures and fallback. Setup and unexpected programming errors may raise; log-write errors propagate and archive-write errors produce the existing warning rather than a false archive-success claim.
+
+## Recommendation versus enforced policy
+
+[`VerdictPolicy.apply`](https://github.com/Avyayalaya/agent-council/blob/main/src/agent_council/verdict.py) computes the policy result. At defaults:
+
+| Condition | Policy result |
+|---|---|
+| Fewer than three valid R1 reviews | INCOMPLETE |
+| Any participating valid-R2 irreducible flag | HOLD |
+| Three or more hard/soft blocks | HOLD |
+| No hard/soft blocks and all present scores at least 3 | SHIP |
+| Otherwise, including scores of 2 or one/two blocks | REVISE |
+
+A hard block is `would_block=true`. A score at or below `soft_block_score` (default 1) counts as a soft block only when the reviewer has no hard block. `ship_min_score` defaults to 3 and `hold_block_count` to 3. Only R2 supplies the irreducible flag in the existing policy; fallback R1 supplies scores and blocking flags.
+
+The synthesis receives these effective settings. [`merge_verdicts`](https://github.com/Avyayalaya/agent-council/blob/main/src/agent_council/orchestrator.py) normally takes the stricter recommendation, while permitting policy HOLD to become REVISE if the model recommends REVISE and no participating reviewer flagged irreducible. INCOMPLETE and irreducible HOLD cannot be bypassed.
+
+The final explanation identifies an overridden recommendation or the downgrade exception. Valid synthesis briefs are preserved. Missing/empty briefs do not change the verdict or cause extra model calls: the result explicitly reports the missing actionable plan, includes available reviewer findings, and directs the operator to the full critiques. It does not invent repairs.
 
 ---
 
@@ -71,19 +66,15 @@ The Council is designed for **tier-1 artifacts**:
 | **Tier 2** | Internal drafts, dashboards, infrastructure, dispatch updates | Skip |
 | **Tier 3** | Daily briefings, internal analyses, planning artifacts | Sample 1-in-5 |
 
-Tier classification is rule-based in v0.1 (glob patterns in `council.yaml#tier_rules`). Model-based and hybrid classifiers are on the v0.3 roadmap.
+Tier classification is rule-based (glob patterns in `council.yaml#tier_rules`). Skipping/sampling applies to the sweep; an explicit `review` or `Council.run()` still reviews the requested artifact and records its tier.
 
 ---
 
 ## The compounding loop (D6)
 
-The Adjudicator reads prior verdicts on the same `artifact_type` from `council_log.jsonl` before merging the current round's verdicts. This means:
+Only the Adjudicator receives up to five prior verdict summaries on the same `artifact_type`, with bounded reasoning/brief excerpts. First reviewers do not see this history. It may help identify recurring concerns, but also carries a risk of reinforcing prior errors. Context reuse does not establish learning or improved quality.
 
-- Two consecutive HOLDs on the same artifact_type sharpen the Adjudicator's reasoning on the third pass.
-- Voice patterns flagged across multiple artifacts ("V1 + V3 keep appearing in linkedin_post") compound into stronger pattern recognition.
-- The producing agent's drift gets surfaced — not just the artifact's flaws.
-
-This is what makes the Council a *system* rather than a stateless judge.
+The repository's mock/scripted tests establish protocol mechanics, not superiority over a unified judge or unreviewed output. Comparative evaluation remains planned. Evidence review is similarly bounded: it assesses support supplied in the artifact or context files, not sources retrieved from the web. A citation alone is not proof that a source was read.
 
 ---
 
@@ -107,24 +98,27 @@ This means:
 
 ## Verdict log schema
 
-Every Council invocation appends one line to `council_log.jsonl` following Rule 35 v2 format:
+Each completed protocol run, including structured failure, appends a flat Rule 35 v2 record. This abridged shape omits per-role detail:
 
 ```json
 {
   "v": 2,
-  "ts": "2026-05-18T...Z",
-  "artifact": "path/to/artifact.md",
+  "span_id": "council-0123456789ab",
+  "artifact_path": "path/to/artifact.md",
   "artifact_type": "linkedin_post",
-  "round1": [{"deliberator": "skeptic", "verdict": "revise", "scores": {...}, ...}, ...],
-  "round2": [...],
-  "adjudicator": {
-    "final_verdict": "REVISE",
-    "reasoning": "...",
-    "revision_brief": "...",
-    "applied_compounding": true,
-    "prior_verdicts_consulted": 3
-  }
+  "verdict": "REVISE",
+  "deliberators": {},
+  "adjudicator_reasoning": "Enforced decision and reasons.",
+  "revision_brief": "1. Required change.",
+  "dissent_summary": "Remaining disagreement or review failures.",
+  "adjudicator_error": null,
+  "adjudicator_schema_failed": false,
+  "adjudicator_reprompts": 0,
+  "prior_verdicts_used": 3,
+  "persisted": true
 }
 ```
 
-Append-only. The Adjudicator reads prior entries on the same `artifact_type` to apply the D6 compounding loop.
+The complete record also includes timestamp, artifact hash, runtime/model identity and elapsed time. Per-role records include validity, errors, scores, flags and R2 changes. Raw attempts and retries live in the archive under `span_id`, including invalid evidence. `adjudicator_synthesis.md` includes synthesis failure details when no usable synthesis is available.
+
+The optional Python `Council(..., adapter=runtime)` entry point changes only adapter selection; omitting it uses the configured factory. One adapter serves the whole protocol, and logs use that adapter's identity. Per-role runtime overrides and configured fail-fast behavior are not implemented.

@@ -19,6 +19,7 @@ import shutil
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 # Make the package importable without installation.
 HERE = Path(__file__).resolve().parent
@@ -27,6 +28,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from agent_council.config import load_config, validate_config  # noqa: E402
 from agent_council.orchestrator import Council  # noqa: E402
+from agent_council.runtimes.mock_cli import MockCLIAdapter  # noqa: E402
 from agent_council.verdict import (  # noqa: E402
     EXIT_REVISE,
     EXIT_SHIP,
@@ -61,6 +63,43 @@ class CouncilEndToEndTest(unittest.TestCase):
         config = load_config(self.config_path)
         errors = validate_config(config)
         self.assertEqual([], errors, f"Config validation errors: {errors}")
+
+    def test_injected_adapter_bypasses_factory_and_is_used_in_audit(self) -> None:
+        class CallerAdapter(MockCLIAdapter):
+            def adapter_name(self) -> str:
+                return "caller_mock"
+
+            def __bool__(self) -> bool:
+                return False
+
+        config = load_config(self.config_path)
+        config["runtime"] = {"type": "not-a-registered-runtime"}
+        adapter = CallerAdapter({"model": "caller-model"})
+        with patch("agent_council.orchestrator.build_adapter") as factory:
+            council = Council(config, self.config_path.parent, adapter=adapter)
+            self.assertIs(adapter, council.adapter)
+            factory.assert_not_called()
+        with patch.object(adapter, "invoke", new=AsyncMock(wraps=adapter.invoke)) as invoke:
+            verdict = asyncio.run(council.run(self.artifact_path))
+            self.assertEqual(9, invoke.await_count)
+        self.assertEqual("REVISE", verdict.verdict)
+        rec = json.loads(self.log_path.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertEqual("caller_mock", rec["runtime"])
+        self.assertEqual("caller-model", rec["model"])
+
+    def test_omitted_or_none_adapter_uses_configured_factory(self) -> None:
+        config = load_config(self.config_path)
+        for kwargs in ({}, {"adapter": None}):
+            with self.subTest(kwargs=kwargs):
+                with patch("agent_council.orchestrator.build_adapter") as factory:
+                    council = Council(config, self.config_path.parent, **kwargs)
+                    factory.assert_called_once_with(config["runtime"])
+                    self.assertIs(factory.return_value, council.adapter)
+
+    def test_adapter_is_keyword_only(self) -> None:
+        config = load_config(self.config_path)
+        with self.assertRaises(TypeError):
+            Council(config, self.config_path.parent, MockCLIAdapter({}))
 
     def test_end_to_end_verdict_shape(self) -> None:
         """Run the Council and assert verdict + log + archive are produced."""

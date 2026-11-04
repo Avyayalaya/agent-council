@@ -9,7 +9,7 @@ permalink: /
 # Agent Council
 {: .fs-9 }
 
-A runtime-portable 5-agent council that adjudicates text artifacts before they ship. Five role-conditioned LLM deliberators run in a 2-round async protocol with cross-read rebuttal. One verdict — SHIP, REVISE, or HOLD — plus a structured revision brief and a full audit transcript.
+A runtime-portable gate for authored, AI-generated and co-created text. Four reviewers take independent first perspectives, share their full findings for one second review, and pass both rounds to a separate Adjudicator. Code enforces SHIP, REVISE, HOLD or INCOMPLETE; the decision includes reasons, required changes and visible disagreement.
 {: .fs-6 .fw-300 }
 
 [Install](#install){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 } [View on GitHub](https://github.com/Avyayalaya/agent-council){: .btn .fs-5 .mb-4 .mb-md-0 }
@@ -18,7 +18,7 @@ A runtime-portable 5-agent council that adjudicates text artifacts before they s
 
 ## Why a council, not a single judge?
 
-LLM-as-judge approaches collapse five distinct concerns into one critic:
+Review requires distinct questions:
 
 - Is the argument adversarially sound?
 - Does it match the operator's voice?
@@ -26,7 +26,7 @@ LLM-as-judge approaches collapse five distinct concerns into one critic:
 - Does it advance the operator's actual goals?
 - Should it ship?
 
-A unified judge averages these into one score. The Council keeps them separated. Each deliberator owns one concern, reads one context, surfaces one kind of dissent. The Adjudicator merges them — but you see *which* deliberator blocked and *why*, not just the merged number.
+A single judge can cover multiple criteria. Council makes the responsibilities explicit and preserves who raised an issue and what changed after cross-reading. This can expose new questions and angles, but does not prove better judgments or require reviewers to agree. Read the [implementation details](docs/architecture.html) and the [author's review workflow](https://github.com/Avyayalaya/agent-council#my-review-workflow); the diagram is not an exact runtime state machine.
 
 ---
 
@@ -48,15 +48,15 @@ git clone https://github.com/Avyayalaya/agent-council.git
 cd agent-council
 pip install -e .
 cp council.yaml.example council.yaml  # then edit
-python -m agent_council review path/to/artifact.md --tier=1
+python -m agent_council review path/to/artifact.md --tier=1 --config=council.yaml
 ```
 
-Requires Python ≥3.11 and at least one supported LLM CLI on PATH.
+Requires Python ≥3.11 and a configured runtime. The offline mock needs no model; other adapters require their configured CLI or server.
 
 ### MCP server (Claude Desktop, Cursor, Cline, custom agents)
 
 ```bash
-pip install mcp>=1.0
+pip install "mcp>=1.0"
 ```
 
 Add to your client's MCP config:
@@ -66,7 +66,10 @@ Add to your client's MCP config:
   "mcpServers": {
     "agent-council": {
       "command": "python",
-      "args": ["<absolute-path>/agent-council/mcp/agent_council_mcp_server.py"]
+      "args": ["<absolute-path>/agent-council/mcp/agent_council_mcp_server.py"],
+      "env": {
+        "COUNCIL_CONFIG": "<absolute-path>/agent-council/council.yaml"
+      }
     }
   }
 }
@@ -78,13 +81,13 @@ Tool exposed: `council_review(artifact_path, tier=1)`. Full setup in the [MCP gu
 
 ## The five roles
 
-| Deliberator | Concern | Reads |
+| Role | Concern | Reads |
 |---|---|---|
 | **Skeptic** | Adversarial review — catches premature coherence, narrative fallacy, survivorship bias, unstated assumptions | (artifact only) |
 | **Voice & Identity** | Voice DNA, banned-pattern enforcement, channel register | Operator's voice corpus + persona DNA |
-| **Evidence & Calibration** | Source verification, evidence-tier classification (T1–T6), confidence levels | (artifact only) |
+| **Evidence & Calibration** | Review supplied support, evidence tiers (T1–T6), confidence and missing evidence; no built-in source retrieval | Artifact + optional supplied source text |
 | **Strategy & Stakes** | Goal alignment, stake calibration, opportunity cost | Operator's goals doc + project state |
-| **Adjudicator** | Merge + prior-verdict loop. Final verdict and revision brief | All four above + `council_log.jsonl` |
+| **Adjudicator** | Separate synthesis, recommendation and revision brief; code enforces policy | Both rounds + prior verdict summaries |
 
 ---
 
@@ -108,7 +111,9 @@ This means the Council ships as a standalone runtime — wire it into Emissary, 
 
 ## Status
 
-**v0.1.0** ships architecture + design only. Empirical evaluation (3-arm benchmark + arXiv paper) lands in v0.2 — see the [CHANGELOG](https://github.com/Avyayalaya/agent-council/blob/main/CHANGELOG.md).
+The Python package includes a working review protocol and mock/scripted tests. Its default remains three schema-valid R1 reviews, with valid-R1 fallback when R2 fails. Failed synthesis yields INCOMPLETE. It does not guarantee every reviewer completed both rounds.
+
+Comparative quality improvement has not been demonstrated in published repository results. Benchmark scaffolding exists; empirical evaluation and a companion paper remain planned in the [CHANGELOG](https://github.com/Avyayalaya/agent-council/blob/main/CHANGELOG.md).
 
 ---
 

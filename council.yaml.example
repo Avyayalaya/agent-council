@@ -117,8 +117,11 @@ adjudicator:
 protocol:
   rounds: 2                          # 1 = independent only, 2 = with cross-read rebuttal
   cross_read: true                   # R2 sees other deliberators' R1
-  fail_fast_on_runtime_error: false  # one deliberator failing != Council failing
-  min_deliberators_for_verdict: 3    # below this, verdict = INCOMPLETE
+  fail_fast_on_runtime_error: false  # reserved/ignored; fail-fast is not implemented
+  min_deliberators_for_verdict: 3    # minimum schema-valid R1 reviews, not all four
+# Failed/disabled R2 falls back to valid R1; invalid R1 cannot be repaired by R2.
+# Each malformed response gets one schema reprompt. Runtime errors are not retried.
+# Synthesis runtime/schema failure yields audited INCOMPLETE, regardless of quorum.
 
 # ---------------------------------------------------------------------------
 # Tier classification — which artifacts the Council reviews.
