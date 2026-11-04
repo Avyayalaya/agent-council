@@ -5,7 +5,7 @@ drive specific schema-fail scenarios and assert the re-prompt path.
 
 Covers:
     - re-prompt success (R1 malformed → retry returns valid → reprompts=1)
-    - re-prompt failure → schema_failed=True, treated as no_dissent
+    - invalid reviews do not count toward quorum; valid R1 survives R2 failure
     - adjudicator schema failure after re-prompt → verdict INCOMPLETE
     - schema_errors persisted in council_log.jsonl
     - mock_cli end-to-end still passes (canned outputs are valid; D5 invisible)
@@ -20,6 +20,7 @@ import sys
 import unittest
 from pathlib import Path
 from typing import Iterable
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -39,11 +40,11 @@ class ScriptedAdapter(RuntimeAdapter):
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        # scripts[(role, attempt)] -> response str
-        self.scripts: dict[str, list[str]] = {}
+        self.scripts: dict[str, list[str | Exception]] = {}
         self.call_count: dict[str, int] = {}
+        self.contexts: dict[str, list[list[str]]] = {}
 
-    def set_script(self, role: str, responses: list[str]) -> None:
+    def set_script(self, role: str, responses: list[str | Exception]) -> None:
         self.scripts[role] = list(responses)
         self.call_count[role] = 0
 
@@ -76,15 +77,15 @@ class ScriptedAdapter(RuntimeAdapter):
         idx = self.call_count.get(role, 0)
         resp = bucket[idx] if idx < len(bucket) else bucket[-1]
         self.call_count[role] = idx + 1
+        self.contexts.setdefault(role, []).append(list(context))
+        if isinstance(resp, Exception):
+            raise resp
         return resp
 
 
 def _build_council_with_scripted(adapter: ScriptedAdapter) -> Council:
     config = load_config(HERE / "council.example.yaml")
-    council = Council(config=config, config_dir=HERE)
-    # Swap in the scripted adapter.
-    council.adapter = adapter
-    return council
+    return Council(config=config, config_dir=HERE, adapter=adapter)
 
 
 class SchemaEnforcementTest(unittest.TestCase):
@@ -142,8 +143,8 @@ class SchemaEnforcementTest(unittest.TestCase):
         self.assertGreaterEqual(sk["reprompts"], 1, "skeptic should have been re-prompted")
         self.assertFalse(sk["schema_failed"], "after valid retry, schema_failed should be False")
 
-    def test_reprompt_failure_treated_as_no_dissent(self) -> None:
-        """Schema fails twice → schema_failed=True; verdict still renders (no_dissent)."""
+    def test_reprompt_failure_preserves_three_valid_review_quorum(self) -> None:
+        """One invalid review does not prevent the other three reaching quorum."""
         adapter = ScriptedAdapter({})
         valid_r1 = _wrap({"score": 3, "would_block": False})
         valid_r2 = _wrap({"score": 3, "would_block": False, "irreducible": False})
@@ -171,6 +172,199 @@ class SchemaEnforcementTest(unittest.TestCase):
         sk = rec["deliberators"]["skeptic"]
         self.assertTrue(sk["schema_failed"], f"skeptic should be schema_failed: {sk}")
         self.assertIn("schema_errors", sk)
+
+    def test_invalid_objects_do_not_count_toward_quorum(self) -> None:
+        roles = ("skeptic", "voice_identity", "evidence", "strategy")
+        for invalid_count in (1, 2, 4):
+            with self.subTest(invalid_count=invalid_count):
+                adapter = ScriptedAdapter({})
+                for role in roles[:invalid_count]:
+                    adapter.set_script(role, [_wrap({})])
+                council = _build_council_with_scripted(adapter)
+                verdict = asyncio.run(council.run(self.artifact_path))
+                expected = "SHIP" if invalid_count == 1 else "INCOMPLETE"
+                self.assertEqual(expected, verdict.verdict)
+                self.assertEqual(4 - invalid_count, sum(
+                    result.succeeded for result in verdict.deliberators.values()
+                ))
+                for role in roles[:invalid_count]:
+                    result = verdict.to_dict()["deliberators"][role]
+                    self.assertFalse(result["succeeded"])
+                    self.assertTrue(result["r1_schema_failed"])
+                    self.assertTrue(result["error"])
+                    self.assertEqual(4, adapter.call_count[role])
+                    transcript = self.archive_dir / verdict.span_id / f"r1_{role}.md"
+                    self.assertIn("{}", transcript.read_text(encoding="utf-8"))
+                if expected == "INCOMPLETE":
+                    self.assertIn("minimum is 3", verdict.reasoning)
+
+    def test_failed_r2_preserves_valid_r1_and_reports_failure(self) -> None:
+        for blocked in (False, True):
+            for failure in (_wrap({}), RuntimeError("review unavailable")):
+                with self.subTest(blocked=blocked, failure=failure):
+                    adapter = ScriptedAdapter({})
+                    r1 = _wrap({"score": 3, "would_block": blocked})
+                    adapter.set_script("skeptic", [r1, failure, failure])
+                    council = _build_council_with_scripted(adapter)
+                    verdict = asyncio.run(council.run(self.artifact_path))
+                    self.assertEqual("REVISE" if blocked else "SHIP", verdict.verdict)
+                    sk = verdict.to_dict()["deliberators"]["skeptic"]
+                    self.assertTrue(sk["succeeded"])
+                    self.assertIsNone(sk["error"])
+                    self.assertTrue(sk["r2_error"])
+                    self.assertIsNone(verdict.deliberators["skeptic"].raw_r2)
+                    self.assertIn("using valid R1", verdict.dissent_summary)
+                    rec = json.loads(self.log_path.read_text(encoding="utf-8").splitlines()[-1])
+                    self.assertEqual(sk["r2_error"], rec["deliberators"]["skeptic"]["r2_error"])
+
+    def test_valid_r2_does_not_repair_invalid_r1_quorum(self) -> None:
+        adapter = ScriptedAdapter({})
+        valid_r2 = _wrap({"score": 3, "would_block": False, "irreducible": False})
+        for role in ("skeptic", "evidence"):
+            adapter.set_script(role, [_wrap({}), _wrap({}), valid_r2])
+        verdict = asyncio.run(_build_council_with_scripted(adapter).run(self.artifact_path))
+        self.assertEqual("INCOMPLETE", verdict.verdict)
+        self.assertFalse(verdict.deliberators["skeptic"].succeeded)
+        self.assertIsNotNone(verdict.deliberators["skeptic"].raw_r2)
+
+    def test_one_round_configuration_does_not_report_r2_failure(self) -> None:
+        adapter = ScriptedAdapter({})
+        config = load_config(HERE / "council.example.yaml")
+        config["protocol"]["rounds"] = 1
+        council = Council(config, HERE, adapter=adapter)
+        verdict = asyncio.run(council.run(self.artifact_path))
+        self.assertEqual("SHIP", verdict.verdict)
+        self.assertEqual(5, sum(adapter.call_count.values()))
+        for result in verdict.deliberators.values():
+            self.assertTrue(result.succeeded)
+            self.assertIsNone(result.r2_error)
+            self.assertFalse(result.r2_schema_failed)
+
+    def test_synthesis_runtime_failure_is_audited_without_extra_retries(self) -> None:
+        for error in (asyncio.TimeoutError("synthesis timed out"), RuntimeError("unavailable")):
+            for first_response in ([], ["not JSON"]):
+                with self.subTest(error=error, first_response=first_response):
+                    adapter = ScriptedAdapter({})
+                    adapter.set_script("adjudicator", [*first_response, error])
+                    council = _build_council_with_scripted(adapter)
+                    verdict = asyncio.run(council.run(self.artifact_path))
+                    self.assertEqual("INCOMPLETE", verdict.verdict)
+                    self.assertEqual(3, verdict.exit_code)
+                    self.assertIn(str(error), verdict.adjudicator_error)
+                    self.assertIn("runtime", verdict.reasoning.lower())
+                    self.assertEqual(len(first_response) + 1, adapter.call_count["adjudicator"])
+                    self.assertEqual(9 + len(first_response), sum(adapter.call_count.values()))
+                    rec = json.loads(self.log_path.read_text(encoding="utf-8").splitlines()[-1])
+                    self.assertEqual(verdict.adjudicator_error, rec["adjudicator_error"])
+                    self.assertEqual(len(first_response), rec["adjudicator_reprompts"])
+                    archive = self.archive_dir / verdict.span_id
+                    self.assertEqual(10, len(list(archive.iterdir())))
+                    self.assertIn('"score": 3', (archive / "r2_evidence.md").read_text(encoding="utf-8"))
+                    synthesis = (archive / "adjudicator_synthesis.md").read_text(encoding="utf-8")
+                    self.assertIn(str(error), synthesis)
+                    if first_response:
+                        self.assertIn(first_response[0], synthesis)
+
+    def test_synthesis_programming_errors_are_not_hidden(self) -> None:
+        for first_response in ([], ["not JSON"]):
+            with self.subTest(first_response=first_response):
+                adapter = ScriptedAdapter({})
+                adapter.set_script("adjudicator", [*first_response, ValueError("adapter bug")])
+                council = _build_council_with_scripted(adapter)
+                with self.assertRaisesRegex(ValueError, "adapter bug"):
+                    asyncio.run(council.run(self.artifact_path))
+
+    def test_reviewer_retry_programming_error_preserves_partial_diagnostics(self) -> None:
+        for round_num in (1, 2):
+            for malformed in ("first malformed response", _wrap({"score": 99})):
+                with self.subTest(round_num=round_num, malformed=malformed):
+                    adapter = ScriptedAdapter({})
+                    valid = _wrap({"score": 3, "would_block": True, "irreducible": False})
+                    failure = ValueError("reviewer retry bug")
+                    responses = (
+                        [malformed, failure, valid] if round_num == 1
+                        else [valid, malformed, failure]
+                    )
+                    adapter.set_script("skeptic", responses)
+                    council = _build_council_with_scripted(adapter)
+                    verdict = asyncio.run(council.run(self.artifact_path))
+                    self.assertEqual("SHIP" if round_num == 1 else "REVISE", verdict.verdict)
+                    result = verdict.deliberators["skeptic"]
+                    self.assertEqual(round_num == 2, result.succeeded)
+                    error = result.error if round_num == 1 else result.r2_error
+                    self.assertEqual("ValueError: reviewer retry bug", error)
+                    self.assertIn(error, verdict.dissent_summary)
+                    self.assertEqual(3, adapter.call_count["skeptic"])
+                    self.assertEqual(10, sum(adapter.call_count.values()))
+
+                    record = json.loads(self.log_path.read_text(encoding="utf-8").splitlines()[-1])
+                    diagnostic = record["deliberators"]["skeptic"]
+                    self.assertTrue(diagnostic[f"r{round_num}_schema_failed"])
+                    self.assertEqual(1, diagnostic["reprompts"])
+                    self.assertTrue(any(
+                        "no JSON block" in entry or "missing required key" in entry
+                        for entry in diagnostic["schema_errors"]
+                    ))
+                    self.assertIn("adapter raised: ValueError", diagnostic["schema_errors"])
+                    transcript = self.archive_dir / verdict.span_id / f"r{round_num}_skeptic.md"
+                    self.assertEqual(malformed, transcript.read_text(encoding="utf-8"))
+                    if round_num == 1 and malformed.startswith("```"):
+                        self.assertEqual({"score": 99}, result.raw_r1)
+
+    def test_reviewer_retry_programming_error_still_raises_from_invocation(self) -> None:
+        adapter = ScriptedAdapter({})
+        failure = ValueError("reviewer retry bug")
+        adapter.set_script("skeptic", ["first malformed response", failure])
+        with self.assertRaises(ValueError) as raised:
+            asyncio.run(Council._invoke_with_schema(adapter, "skeptic", [], "skeptic", 1))
+        self.assertIs(failure, raised.exception)
+        self.assertEqual(2, adapter.call_count["skeptic"])
+
+    def test_audit_write_errors_are_not_hidden(self) -> None:
+        council = _build_council_with_scripted(ScriptedAdapter({}))
+        with patch.object(council.log, "append", side_effect=OSError("disk unavailable")):
+            with self.assertRaisesRegex(OSError, "disk unavailable"):
+                asyncio.run(council.run(self.artifact_path))
+
+    def test_enforced_verdict_and_explanation_agree(self) -> None:
+        for score, irreducible, expected in ((2, False, "REVISE"), (3, True, "HOLD")):
+            with self.subTest(expected=expected):
+                adapter = ScriptedAdapter({})
+                review = _wrap({
+                    "score": score, "would_block": False, "irreducible": irreducible,
+                    "top_3_failure_modes": ["Pricing claim lacks supplied evidence."],
+                })
+                adapter.set_script("skeptic", [review])
+                adapter.set_script("adjudicator", [_wrap({
+                    "verdict": "SHIP", "reasoning": "Ready to ship.", "revision_brief": None,
+                })])
+                verdict = asyncio.run(_build_council_with_scripted(adapter).run(self.artifact_path))
+                self.assertEqual(expected, verdict.verdict)
+                self.assertIn(expected, verdict.reasoning)
+                self.assertIn("recommendation SHIP", verdict.reasoning)
+                self.assertNotIn("Ready to ship", verdict.reasoning)
+                self.assertIn("Pricing claim lacks supplied evidence.", verdict.revision_brief)
+                self.assertIn("No actionable revision brief", verdict.revision_brief)
+
+    def test_configured_policy_and_full_findings_reach_synthesis(self) -> None:
+        adapter = ScriptedAdapter({})
+        review = _wrap({
+            "score": 4, "would_block": False, "irreducible": False,
+            "claim_tier_map": [{"claim": "unique supporting detail", "tier": "T5"}],
+        })
+        adapter.set_script("evidence", [review])
+        config = load_config(HERE / "council.example.yaml")
+        config["adjudicator"]["verdict_policy"] = {
+            "ship_min_score": 4, "soft_block_score": 2, "hold_block_count": 4,
+        }
+        council = Council(config=config, config_dir=HERE, adapter=adapter)
+        asyncio.run(council.run(self.artifact_path))
+        pack = "\n".join(adapter.contexts["adjudicator"][0])
+        for setting in ("ship_min_score=4", "soft_block_score=2", "hold_block_count=4"):
+            self.assertIn(setting, pack)
+        self.assertIn("minimum of 3", pack)
+        self.assertIn("unique supporting detail", pack)
+        self.assertIn("unique supporting detail", "\n".join(adapter.contexts["skeptic"][1]))
 
     def test_adjudicator_schema_failure_returns_incomplete(self) -> None:
         """Adjudicator output malformed even after re-prompt → verdict INCOMPLETE."""

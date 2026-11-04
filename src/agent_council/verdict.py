@@ -1,9 +1,8 @@
 """Verdict dataclass + SHIP/REVISE/HOLD policy engine.
 
-The policy is data-driven from ``council.yaml#adjudicator.verdict_policy``:
-    ship:   "0 deliberators set would_block:true after R2"
-    revise: "1-2 would_block AND no 'irreducible' flag"
-    hold:   "3+ would_block OR any 'irreducible' flag"
+Numeric score and block thresholds come from
+``council.yaml#adjudicator.verdict_policy``. Only successful R1 reviewers
+participate; valid R2 takes precedence, with valid-R1 fallback.
 
 The Adjudicator's own verdict (from its synthesis output) is normally trusted,
 but `VerdictPolicy.apply` recomputes from raw deliberator flags so a buggy
@@ -45,12 +44,19 @@ class DeliberatorResult:
     r2_escalations: list[str] = field(default_factory=list)
     raw_r1: dict[str, Any] | None = None
     raw_r2: dict[str, Any] | None = None
-    error: str | None = None  # populated if this deliberator failed
+    error: str | None = None  # R1 failure; R2 failure permits valid-R1 fallback
+    r1_schema_failed: bool = False
+    r2_schema_failed: bool = False
+    r2_error: str | None = None
 
     @property
     def succeeded(self) -> bool:
-        """True if the deliberator produced a parseable R1 critique."""
-        return self.error is None and self.raw_r1 is not None
+        """True if R1 is present and has no reported runtime/schema failure."""
+        return (
+            self.error is None
+            and self.raw_r1 is not None
+            and not self.r1_schema_failed
+        )
 
 
 @dataclass
@@ -58,8 +64,8 @@ class Verdict:
     """The Council's final verdict on an artifact.
 
     Verdict values: SHIP | REVISE | HOLD | INCOMPLETE.
-    INCOMPLETE means fewer than ``min_deliberators_for_verdict`` produced
-    parseable output (see council.yaml#protocol.min_deliberators_for_verdict).
+    INCOMPLETE means fewer than ``min_deliberators_for_verdict`` produced valid
+    R1 output, or synthesis failed. R2 failures permit valid-R1 fallback.
     """
 
     verdict: str
@@ -69,6 +75,7 @@ class Verdict:
     deliberators: dict[str, DeliberatorResult] = field(default_factory=dict)
     adjudicator_raw: dict[str, Any] | None = None
     span_id: str = ""
+    adjudicator_error: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serializable representation suitable for JSON output."""
@@ -90,10 +97,14 @@ class Verdict:
                     "top_issues": v.top_issues,
                     "succeeded": v.succeeded,
                     "error": v.error,
+                    "r1_schema_failed": v.r1_schema_failed,
+                    "r2_schema_failed": v.r2_schema_failed,
+                    "r2_error": v.r2_error,
                 }
                 for k, v in self.deliberators.items()
             },
             "span_id": self.span_id,
+            "adjudicator_error": self.adjudicator_error,
         }
 
     def to_json(self, indent: int = 2) -> str:
@@ -135,10 +146,38 @@ class VerdictPolicy:
     def __init__(self, policy_config: dict | None = None) -> None:
         """Initialize from ``council.yaml#adjudicator.verdict_policy``.
 
-        The config is mostly documentation in v0.1; the rule logic is hardcoded
-        but stays open to override via subclass when the rules evolve.
+        Numeric thresholds configure the otherwise fixed score-aware rules.
         """
         self.config = policy_config or {}
+
+    def describe(self, min_deliberators: int = 3) -> str:
+        """Describe the effective rules supplied to the synthesis model."""
+        ship, soft, hold = self._thresholds()
+        return (
+            f"- Require a minimum of {min_deliberators} schema-valid R1 reviews. "
+            "Invalid R1 does not count; valid R2 cannot repair missing/invalid R1.\n"
+            "- Use valid R2 flags/scores where present; otherwise use valid R1. "
+            "Only valid R2 irreducible flags participate in this policy.\n"
+            f"- Thresholds: ship_min_score={ship}, soft_block_score={soft}, "
+            f"hold_block_count={hold}.\n"
+            "- A hard block is would_block=true. A score at or below soft_block_score "
+            "counts as a soft block only when that reviewer has no hard block.\n"
+            "- HOLD: any participating R2 irreducible flag, or hard+soft blocks "
+            "reach hold_block_count.\n"
+            "- SHIP: no hard/soft blocks and every present score clears ship_min_score. "
+            "Otherwise REVISE. Missing scores fall back to binary flags.\n"
+            "- The runtime enforces INCOMPLETE on insufficient valid R1 or failed synthesis. "
+            "Otherwise the stricter of policy and model recommendation wins, except "
+            "policy HOLD may become REVISE when the model recommends REVISE and "
+            "no participating reviewer has irreducible dissent. Explain that exception.\n"
+        )
+
+    def _thresholds(self) -> tuple[int, int, int]:
+        return (
+            int(self.config.get("ship_min_score", 3)),
+            int(self.config.get("soft_block_score", 1)),
+            int(self.config.get("hold_block_count", 3)),
+        )
 
     def apply(
         self,
@@ -171,9 +210,7 @@ class VerdictPolicy:
             (verdict, reasoning) tuple. Verdict is one of
             SHIP | REVISE | HOLD | INCOMPLETE.
         """
-        ship_min_score = int(self.config.get("ship_min_score", 3))
-        soft_block_score = int(self.config.get("soft_block_score", 1))
-        hold_block_count = int(self.config.get("hold_block_count", 3))
+        ship_min_score, soft_block_score, hold_block_count = self._thresholds()
 
         succeeded = [r for r in results.values() if r.succeeded]
         if len(succeeded) < min_deliberators:
@@ -181,7 +218,7 @@ class VerdictPolicy:
                 "INCOMPLETE",
                 (
                     f"Only {len(succeeded)} of {len(results)} deliberators produced "
-                    f"parseable output; minimum is {min_deliberators}. "
+                    f"schema-valid R1 output; minimum is {min_deliberators}. "
                     "Verdict cannot be rendered."
                 ),
             )
@@ -229,7 +266,7 @@ class VerdictPolicy:
         if not hard_block and not soft_block and not weak:
             return (
                 "SHIP",
-                "No deliberator blocked after Round 2 and all scores cleared the bar.",
+                "No participating deliberator blocked and all present scores cleared the bar.",
             )
 
         reasons: list[str] = []

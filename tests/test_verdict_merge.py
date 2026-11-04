@@ -25,7 +25,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from agent_council.orchestrator import merge_verdicts  # noqa: E402
+from agent_council.orchestrator import explain_verdict, merge_verdicts  # noqa: E402
 from agent_council.verdict import DeliberatorResult  # noqa: E402
 
 
@@ -92,6 +92,59 @@ def _zero_blockers() -> dict[str, DeliberatorResult]:
 
 class MergeVerdictsTest(unittest.TestCase):
     """Pin the merge semantics directly."""
+
+    def test_overridden_approval_reasoning_is_not_the_final_explanation(self) -> None:
+        for policy in ("REVISE", "HOLD", "INCOMPLETE"):
+            with self.subTest(policy=policy):
+                reasoning, _ = explain_verdict(
+                    policy, policy, "Enforced policy grounds.",
+                    {"verdict": "SHIP", "reasoning": "Ready to ship."}, _two_blockers(),
+                )
+                self.assertIn(f"Final verdict {policy}", reasoning)
+                self.assertIn("recommendation SHIP", reasoning)
+                self.assertIn("Enforced policy grounds.", reasoning)
+                self.assertNotIn("Ready to ship.", reasoning)
+
+    def test_existing_synthesis_brief_is_preserved(self) -> None:
+        brief = "1. Cite the pricing source."
+        reasoning, result = explain_verdict(
+            "REVISE", "REVISE", "One block.",
+            {"verdict": "REVISE", "reasoning": "Fix the source.", "revision_brief": brief},
+            _two_blockers(),
+        )
+        self.assertEqual("Fix the source.", reasoning)
+        self.assertEqual(brief, result)
+
+    def test_missing_brief_and_findings_are_explicit_not_fabricated(self) -> None:
+        for value in (None, ""):
+            with self.subTest(value=value):
+                _, brief = explain_verdict(
+                    "REVISE", "REVISE", "One block.",
+                    {"verdict": "REVISE", "reasoning": "Revise.", "revision_brief": value},
+                    _two_blockers(),
+                )
+                self.assertIn("No actionable revision brief", brief)
+                self.assertIn("Required changes remain unresolved", brief)
+                self.assertIn("archived critiques", brief)
+
+    def test_downgrade_explanation_names_policy_exception(self) -> None:
+        reasoning, _ = explain_verdict(
+            "REVISE", "HOLD", "Four blocks.",
+            {"verdict": "REVISE", "reasoning": "All four issues are fixable."},
+            _four_blockers(),
+        )
+        self.assertIn("policy recommended HOLD", reasoning)
+        self.assertIn("non-irreducible HOLD-to-REVISE exception", reasoning)
+        self.assertIn("All four issues are fixable.", reasoning)
+
+    def test_escalation_explanation_names_model_decision(self) -> None:
+        reasoning, _ = explain_verdict(
+            "HOLD", "REVISE", "Two blocks.",
+            {"verdict": "HOLD", "reasoning": "The claims require structural rework."},
+            _two_blockers(),
+        )
+        self.assertIn("policy recommended REVISE", reasoning)
+        self.assertIn("Adjudicator escalated", reasoning)
 
     # ------------------------------------------------------------------
     # Schema-failure: always INCOMPLETE.
