@@ -2,8 +2,8 @@
 
 [![tests](https://github.com/Avyayalaya/agent-council/actions/workflows/test.yml/badge.svg)](https://github.com/Avyayalaya/agent-council/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![python ≥3.11](https://img.shields.io/badge/python-≥3.11-blue.svg)](pyproject.toml)
-[![version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md)
+[![Python tested: 3.11 to 3.13](https://img.shields.io/badge/python-tested%203.11%20to%203.13-blue.svg)](.github/workflows/test.yml)
+[![Python package: 0.1.0](https://img.shields.io/badge/python%20package-0.1.0-green.svg)](pyproject.toml)
 
 > *Four reviewers examine your work from distinct perspectives; a separate adjudicator turns their findings into a decision with reasons and required changes.*
 
@@ -38,7 +38,7 @@ cp council.yaml.example council.yaml  # then edit
 python -m agent_council review path/to/artifact.md --tier=1 --config=council.yaml
 ```
 
-Requires Python ≥3.11 and a configured runtime. `mock_cli` needs no model or external service.
+Python 3.11–3.13 are covered by [CI](.github/workflows/test.yml) and recommended. The [package metadata](pyproject.toml) permits Python ≥3.10, a broader range than is currently tested. A configured runtime is also needed; `mock_cli` needs no model or external service.
 
 ### MCP server (Claude Desktop, Cursor, Cline, custom agents)
 
@@ -66,7 +66,7 @@ Tool exposed: `council_review(artifact_path, tier=1)`. Full setup: [mcp/README.m
 
 ### GitHub Copilot CLI, Cursor, Cline, OpenCode (via APM Skills)
 
-`v0.1.1` ships each deliberator as a standalone Skill under [`skills/`](skills/) so any APM-compatible harness gets the methodology inline — no Python CLI required for single-perspective review.
+Plugin release `v0.1.1` introduced the standalone Skills under [`skills/`](skills/), so any APM-compatible harness gets the methodology inline — no Python CLI required for single-perspective review. Plugin releases and the Python package are versioned independently; the Python package remains at `0.1.0`. See the [CHANGELOG](CHANGELOG.md) for plugin release history.
 
 ```bash
 apm marketplace add Avyayalaya/agent-council
@@ -239,7 +239,7 @@ The Council was designed to be invoked from outside an agent loop, not from insi
 PYTHONPATH=src python -m unittest tests.test_modularity_invariant -v
 ```
 
-The test scans the host operator system's `agents/*/prompt.md` files and asserts zero references to Council. If a producing agent's prompt starts to know about the gate that reviews it, the build fails.
+When Council is installed within the expected host-workspace layout, the prompt check scans that external system's `agents/*/prompt.md` files for known Council references, with explicit exemptions for routing agents. Those host-agent files are not shipped in this repository. The prompt check is skipped when the host directory or prompts are absent, as in a standalone checkout; the separate package-import isolation checks still run.
 
 This means:
 
