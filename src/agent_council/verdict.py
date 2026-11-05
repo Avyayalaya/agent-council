@@ -22,6 +22,65 @@ EXIT_REVISE = 1
 EXIT_HOLD = 2
 EXIT_INCOMPLETE = 3
 EXIT_NOT_FOUND = 4
+LEGACY_FINDING_FIELDS = (
+    "voice_violations", "violations", "top_3_failure_modes",
+    "top_3_issues", "calibration_issues",
+)
+
+
+@dataclass
+class ReviewFinding:
+    """One reviewer's stated concern and grounds, not independently verified evidence."""
+
+    location: str = ""
+    concern: str = ""
+    basis: str = ""
+    impact: str = ""
+    resolution: str = ""
+
+    def describe(self) -> str:
+        parts = [self.concern]
+        for label, value in (
+            ("Location", self.location), ("Basis", self.basis),
+            ("Why it matters", self.impact), ("Resolution", self.resolution),
+        ):
+            if value:
+                parts.append(f"{label}: {value}")
+        return "; ".join(parts)
+
+
+def normalize_findings(payload: dict[str, Any]) -> list[ReviewFinding]:
+    """Preserve new findings and known legacy shapes without inventing absent detail."""
+    if "findings" in payload:
+        return [
+            ReviewFinding(
+                location=item["location"], concern=item["concern"], basis=item["basis"],
+                impact=item["impact"], resolution=item["resolution"],
+            )
+            for item in payload["findings"]
+        ]
+
+    def text(value: Any) -> str:
+        return value if isinstance(value, str) else ""
+
+    # Prefer structured legacy records to headline-only summaries.
+    items = next((payload[key] for key in LEGACY_FINDING_FIELDS if payload.get(key)), [])
+    findings: list[ReviewFinding] = []
+    if not isinstance(items, list):
+        return findings
+    for item in items:
+        if isinstance(item, str):
+            findings.append(ReviewFinding(concern=item))
+        elif isinstance(item, dict):
+            snippet = text(item.get("snippet"))
+            rule = text(item.get("rule"))
+            line = item.get("line")
+            location = f"Line {line}: {snippet}" if isinstance(line, (int, str)) else snippet
+            findings.append(ReviewFinding(
+                location=location, concern=text(item.get("concern")) or snippet or rule,
+                basis=rule, resolution=text(item.get("fix")),
+            ))
+    return findings
 
 
 @dataclass
@@ -48,6 +107,8 @@ class DeliberatorResult:
     r1_schema_failed: bool = False
     r2_schema_failed: bool = False
     r2_error: str | None = None
+    r1_findings: list[ReviewFinding] = field(default_factory=list)
+    r2_findings: list[ReviewFinding] | None = None
 
     @property
     def succeeded(self) -> bool:
@@ -76,6 +137,10 @@ class Verdict:
     adjudicator_raw: dict[str, Any] | None = None
     span_id: str = ""
     adjudicator_error: str | None = None
+    artifact_sha256: str = ""
+    review_brief_sha256: str | None = None
+    strengths: list[str] = field(default_factory=list)
+    optional_suggestions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serializable representation suitable for JSON output."""
@@ -100,11 +165,20 @@ class Verdict:
                     "r1_schema_failed": v.r1_schema_failed,
                     "r2_schema_failed": v.r2_schema_failed,
                     "r2_error": v.r2_error,
+                    "r1_findings": [asdict(finding) for finding in v.r1_findings],
+                    "r2_findings": (
+                        [asdict(finding) for finding in v.r2_findings]
+                        if v.r2_findings is not None else None
+                    ),
                 }
                 for k, v in self.deliberators.items()
             },
             "span_id": self.span_id,
             "adjudicator_error": self.adjudicator_error,
+            "artifact_sha256": self.artifact_sha256,
+            "review_brief_sha256": self.review_brief_sha256,
+            "strengths": self.strengths,
+            "optional_suggestions": self.optional_suggestions,
         }
 
     def to_json(self, indent: int = 2) -> str:

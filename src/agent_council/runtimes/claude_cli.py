@@ -3,15 +3,13 @@
 Invocation pattern (v0.1): ``claude --print --model <model>`` via stdin/stdout.
 UTF-8 encoding is explicit on both ends (P29 — Windows + PowerShell + UTF-8 lesson).
 
-If ``claude`` is not on PATH, ``health_check()`` returns False and the orchestrator
-will fail fast with a clear message before any deliberator call is made.
+``health_check()`` is an explicit availability probe. Invocation errors are
+reported as runtime failures; no implicit version check or provider call is made.
 """
 
 from __future__ import annotations
 
-import asyncio
 import shutil
-import sys
 from typing import Iterable
 
 from agent_council.runtimes.base import RuntimeAdapter
@@ -55,47 +53,30 @@ class ClaudeCLIAdapter(RuntimeAdapter):
             RuntimeError: on non-zero exit code from the CLI.
         """
         binary = self.binary or "claude"
-        chosen_model = model or self.default_model
-        # Build CLI args: respect declared flags, append --model if not present.
-        args: list[str] = [binary, *self.flags]
-        if chosen_model and not any(f.startswith("--model") for f in self.flags):
-            args.extend(["--model", chosen_model])
+        flags = list(self.flags)
+        if model is not None:
+            if not model.strip():
+                raise ValueError("model override must not be empty")
+            kept = []
+            index = 0
+            while index < len(flags):
+                flag = flags[index]
+                if flag == "--model":
+                    if index + 1 >= len(flags) or flags[index + 1].startswith("-"):
+                        raise ValueError("--model in runtime.flags requires a value")
+                    index += 2
+                elif flag.startswith("--model="):
+                    index += 1
+                else:
+                    kept.append(flag)
+                    index += 1
+            flags = [*kept, "--model", model]
+        elif self.default_model and not any(
+            flag == "--model" or flag.startswith("--model=") for flag in flags
+        ):
+            flags.extend(["--model", self.default_model])
+        args: list[str] = [binary, *flags]
 
         full = self.build_full_prompt(prompt, context)
 
-        # Ensure ProactorEventLoop on Windows (required for asyncio subprocess).
-        if sys.platform == "win32":
-            # asyncio in Python 3.10+ defaults to Proactor on Windows already,
-            # but explicit is better than implicit per RP0-2.
-            try:
-                asyncio.get_event_loop_policy()
-            except RuntimeError:
-                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(full.encode("utf-8")),
-                timeout=self.timeout_seconds,
-            )
-        except asyncio.TimeoutError:
-            # Best-effort kill — let the OS reap the process.
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            raise
-
-        if proc.returncode != 0:
-            err = stderr_b.decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(
-                f"claude CLI exited with code {proc.returncode}: {err}"
-            )
-
-        return stdout_b.decode("utf-8", errors="replace")
+        return await self.run_subprocess(args, full)

@@ -141,13 +141,25 @@ Policy uses `ship_min_score=3`, `soft_block_score=1`, `hold_block_count=3` by de
     }
   },
   "span_id": "council-<12hex>",
-  "adjudicator_error": null
+  "adjudicator_error": null,
+  "artifact_sha256": "<64hex>",
+  "review_brief_sha256": null,
+  "strengths": [],
+  "optional_suggestions": []
 }
 ```
 
 This is a shape illustration: absent scores are null, and `revision_brief` is null on SHIP/INCOMPLETE. The new failure fields are additive; existing field names and verdict/exit-code enums are preserved. `succeeded` describes R1 validity, not completion of both rounds.
 
 **Reviewer schemas:** R1 requires numeric `score` in [1,5] and boolean `would_block`; R2 additionally requires boolean `irreducible`. Prompts request richer role-specific findings, but runtime validation does not require all of them. **Model synthesis schema:** SHIP/REVISE/HOLD plus nonempty reasoning; revision brief and dissent summary remain optional. INCOMPLETE is produced by runtime enforcement, not the synthesis model's accepted enum.
+
+Reviewers can additionally return `findings`, a list of objects with nonempty string `location`, `concern`, `basis`, `impact`, and `resolution`; when supplied, these fields are validated. `strengths` is an optional list of nonempty strings for reviewers and synthesis. Empty lists are valid. Legacy outputs without these fields remain accepted. Each returned deliberator record also exposes normalized `r1_findings` and `r2_findings`; known legacy shapes preserve available details and leave absent details blank. Structured findings are model claims, not independently verified facts, and do not replace the existing score/block policy.
+
+`optional_suggestions` is also an optional list of nonempty strings in reviewer/synthesis output. The final list is returned and logged separately from the required `revision_brief` and preserved `strengths`. It does not affect code-enforced policy. Exact duplicate final suggestions/strengths are removed, with raw synthesis retained; semantic grouping and faithful replacement wording remain model responsibilities, not enforced guarantees.
+
+`r2_findings` is null if R2 supplied no finding list or did not succeed, and `[]` if an empty list was explicitly supplied. This distinguishes omitted legacy detail from withdrawal of all remaining findings. No automatic resolution or selective follow-up loop is added.
+
+`Council.run(..., review_brief="...")` accepts an optional per-run purpose, audience, constraints and supplied support. CLI `review --brief-file=<UTF-8 path>` and MCP `council_review(review_brief=...)` expose the same input. It reaches every round, is archived when supplied, and has a returned/logged hash. The captured artifact text is archived rather than rereading a potentially changed file; returned `artifact_sha256` identifies that reviewed snapshot, not automatically the current file.
 
 **Log line (Rule 35 v2 — `council_log.jsonl`, per-role records omitted here):**
 
@@ -191,6 +203,8 @@ This is a shape illustration: absent scores are null, and `revision_brief` is nu
 | `gh_models` | Placeholder only | Not a usable review runtime | No working GitHub Models invocation |
 
 For a configured adapter, subclass `RuntimeAdapter`, implement `invoke(prompt, context, model=None)`, `health_check` and `adapter_name`, then register in `runtimes/__init__.py:build_adapter`. Python callers may instead supply `Council(config, config_dir, adapter=runtime)`: this keyword-only parameter skips factory construction, while omission/None preserves the configured default. One adapter handles all calls; per-role runtime overrides are not implemented. See the [Python example](README.md#use-a-caller-supplied-runtime).
+
+Claude/Ollama subprocess adapters report expected launch errors as runtime failures and terminate/drain the direct child on timeout or cancellation, with up to five seconds of cleanup and an explicit warning if it fails. `RuntimeAdapter.run_subprocess` supports stdin or closed-stdin invocation and rejects oversized Windows command lines without truncating input. It does not restrict tool permissions inside a provider CLI. Claude's explicit per-call model override takes precedence over model flags; omission preserves configured selection. Invalid timeout values fail before subprocess creation.
 
 ### Modularity invariant (Condition 3)
 

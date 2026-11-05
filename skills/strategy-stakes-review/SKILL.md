@@ -89,9 +89,9 @@ The skill encodes the Strategy & Stakes role from the `agent-council` 5-delibera
 
 ## Hard Prerequisite
 
-This skill **requires** a canonical goals framework in context. Without one (e.g., `goals.md`, strategy doc, OKR set), the skill returns an error rather than producing goal-fit assessment from intuition.
+This skill requires supplied goals or an explicit purpose in the review brief. Assess that stated objective; a brief does not authorize invention of the operator's wider priorities.
 
-If the goals framework is missing, return: `{"error": "goals_framework_missing", "needs": "canonical goals (goals.md, OKR set, or strategy hierarchy)"}`. This is non-negotiable. Strategic-fit assessment without committed goals is theater.
+If neither is supplied, return `{"error": "goals_framework_missing", "needs": "goals or an explicit review purpose"}` rather than guessing.
 
 ## Standalone vs Composed Use
 
@@ -104,9 +104,15 @@ If the goals framework is missing, return: `{"error": "goals_framework_missing",
 
 ## Method
 
+A proposed resolution must not add facts, commitments or scope the author did not supply. A wording correction must not invent a rollout, audience, deadline or experiment. Put possible additional work in `optional_suggestions` as an explicit author choice. State each underlying concern once.
+
+Preserve a well-chosen purpose rather than replacing it with your preferred project. There is no quota of problems to find; empty findings are valid. Distinguish an explicit goal conflict from a legitimate operator trade-off. Do not invent queued work or deadlines. Leave good work alone.
+
+Alongside the existing output, include `strengths` and `findings`. Each finding has non-empty strings `location`, `concern`, `basis`, `impact` and `resolution`: the passage, concern, supplied goal/constraint, consequence and smallest useful change or operator decision. In R2 return all remaining findings and explain which evidence or reasoning justified withdrawals.
+
 ### Step 1: Confirm the goals framework is loaded
 
-Before assessment, confirm the canonical goals are in context. If not, return the framework-missing error. Do not proceed.
+Before assessment, confirm goals or an explicit review purpose are supplied. If not, return the framework-missing error.
 
 ### Step 2: Name the primary and secondary goal
 
@@ -126,7 +132,7 @@ What does the operator lose by spending the hour required to finish and ship thi
 - "a resume update deferred by two days"
 - "Three Lattice spec entries do not get written"
 
-Generic "there is opportunity cost" is useless. **Name the queued work the artifact preempts.**
+Generic "there is opportunity cost" is useless. Name competing work only when it is supplied; otherwise state that this dimension was not assessed.
 
 ### Step 4: Run the kill-criteria check
 
@@ -145,7 +151,7 @@ One sentence. Be specific about which positioning element drifts.
 
 ### Step 6: Surface the one strategic risk
 
-If you had to flag exactly one risk a hostile portfolio manager would raise, what is it? ≤1 sentence. The discipline of "one" forces precision.
+Name the most important supported strategic risk, if any. Do not manufacture a risk to fill the field.
 
 ### Step 7: Set the block flags
 

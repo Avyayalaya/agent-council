@@ -108,6 +108,12 @@ The skill uses a standard 6-tier scale:
 
 ## Method
 
+A proposed resolution must not add facts, commitments or scope the author did not supply. Narrow an overclaim to the supported observation rather than promising studies or new participants. Put non-blocking research/measurement ideas in `optional_suggestions` as choices, not required edits. State each underlying concern once.
+
+Use the supplied purpose and audience to judge the consequence of a claim. Preserve accurate wording and honest uncertainty; a labelled anecdote need not become a research paper. There is no quota of problems to find. Empty findings are valid, and a URL alone is not verified source content.
+
+Alongside the existing output, include `strengths` (well-supported choices) and `findings`. Each finding has non-empty strings `location`, `concern`, `basis`, `impact` and `resolution`: the claim, problem, supplied support or gap, consequence and minimal correction/evidence needed. In R2 return all remaining findings and explain withdrawals. Other reviewers' agreement is not source verification. Leave good work alone.
+
 ### Step 1: Extract every load-bearing claim
 
 Walk the artifact. A load-bearing claim is one the argument's spine rests on. Filler ("agentic systems are interesting") is not load-bearing. **Numerical claims, named systems, attributions, and causal claims usually are.**
@@ -118,11 +124,13 @@ Quote each claim verbatim (≤30 words). Do not paraphrase — paraphrase corrup
 
 For each claim, ask: what tier of evidence actually supports this? Use the T1-T6 scale above. **Tier assignment requires reading the underlying support, not inferring from how confident the prose sounds.**
 
-- If the claim cites a verified primary source with a stable link → T1 or T2 depending on recency
-- If the claim cites a reputable secondary source that references T1 → T3
+- If supplied primary-source content actually supports the claim → T1 or T2 depending on recency
+- If supplied reputable secondary-source content supports the claim and identifies its primary support → T3
 - If the claim references the operator's own public prior work → T4
 - If the claim is "I did X" or "we ran Y" with no link → T5
 - If the claim is a sweeping generalization with no citation → T6
+
+Source reputation and claim support are different assessments. Do not mark a claim verified merely because a familiar publisher or URL is named; identify unprovided source content as a gap, without fetching it unless separately authorized.
 
 ### Step 3: Assess status per claim
 

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Optional per-run review brief across Python, CLI (`--brief-file`) and MCP, shared with reviewers and synthesis and archived with a content hash.
+- Structured per-round findings preserving location, concern, grounds, consequence and resolution, with legacy output compatibility and explicit empty findings.
+- Synthesis strengths identifying useful choices to preserve, surfaced in human-readable review output.
+- Separate optional suggestions from required changes and preserved strengths, with validated list entries and exact-duplicate removal.
+
+### Changed
+
+- Reviewer prompts and standalone skills ground feedback in supplied purpose, evidence and voice requirements; permit sound work to pass without invented criticism; require reasons for changes of view.
+- Reviewers and synthesis are instructed not to add unsupplied facts or commitments in suggested repairs, and to state each necessary change once rather than duplicating reviewer perspectives.
+- Explicit Claude model overrides now take precedence over either configured model-flag form; omission retains configured flag precedence.
+
+### Fixed
+
+- Archive the exact captured artifact text rather than rereading an edited file after review; expose its hash in returned verdicts.
+- Preserve supplied review briefs' UTF-8 bytes and line endings when archiving, including Windows CRLF, so the archive matches the reviewed input hash.
+- Preserve known `violations` output alongside older finding aliases instead of losing it from structured summaries.
+- Normalize expected subprocess launch failures, drain the directly launched child after timeout/cancellation, reject oversized Windows commands without truncation, and validate subprocess timeouts.
+- Show valid-R1 fallback blocking flags correctly in human-readable CLI output.
+
+These changes have offline contract/regression coverage; improved real-model judgment is not established by scripted tests.
+
 ### Planned for 0.2.0
 
 - Empirical evaluation: AgentOS-Bench-style 3-arm benchmark (baseline / unified-judge / Council) with statistical confidence intervals

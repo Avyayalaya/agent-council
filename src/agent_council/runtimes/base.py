@@ -16,6 +16,10 @@ Contract (every adapter must honor):
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import asyncio
+import math
+import subprocess
+import sys
 from typing import Iterable
 
 
@@ -79,6 +83,66 @@ class RuntimeAdapter(ABC):
     # ------------------------------------------------------------------
     # Shared helpers — concrete adapters can use these or override.
     # ------------------------------------------------------------------
+    async def run_subprocess(self, args: list[str], prompt: str | None = None) -> str:
+        """Run a CLI with bounded communication and cleanup; never invoke a shell.
+
+        A supplied prompt uses UTF-8 stdin. Without one, stdin is closed.
+        Adapters using argument transport must keep their full command within
+        platform limits; this helper rejects oversized Windows commands.
+        """
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ValueError("runtime.timeout_seconds must be finite and positive")
+        if sys.platform == "win32":
+            units = len(subprocess.list2cmdline(args).encode("utf-16-le")) // 2 + 1
+            if units > 32767:
+                raise RuntimeError(
+                    f"{self.adapter_name()} command exceeds the Windows command-line limit "
+                    f"({units} UTF-16 units including terminator; maximum 32767). "
+                    "Use a runtime with supported stdin transport or reduce supplied input. "
+                    "No input was truncated."
+                )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.PIPE if prompt is not None else asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError as e:
+            raise RuntimeError(
+                f"{self.adapter_name()} could not start the configured executable: "
+                f"{type(e).__name__}: {e.strerror or 'process creation failed'}"
+            ) from e
+
+        communication = asyncio.create_task(
+            proc.communicate(prompt.encode("utf-8") if prompt is not None else None)
+        )
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=self.timeout_seconds
+            )
+        except (asyncio.TimeoutError, asyncio.CancelledError, OSError) as e:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass  # The child may have exited between timeout and termination.
+            try:
+                # communicate drains pipes and waits for the terminated child.
+                await asyncio.wait_for(communication, timeout=5)
+            except (asyncio.TimeoutError, OSError) as cleanup_error:
+                print(
+                    f"warning: {self.adapter_name()} subprocess cleanup failed: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}",
+                    file=sys.stderr,
+                )
+            if isinstance(e, OSError) and not isinstance(e, asyncio.TimeoutError):
+                raise RuntimeError(f"{self.adapter_name()} subprocess communication failed: {e}") from e
+            raise
+        if proc.returncode != 0:
+            err = stderr_b.decode("utf-8", errors="replace")[:500]
+            raise RuntimeError(f"{self.adapter_name()} exited with code {proc.returncode}: {err}")
+        return stdout_b.decode("utf-8", errors="replace")
+
     @staticmethod
     def join_context(context: Iterable[str]) -> str:
         """Default context join: blobs separated by ``\\n\\n---\\n\\n``."""

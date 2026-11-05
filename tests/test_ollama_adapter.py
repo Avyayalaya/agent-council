@@ -49,9 +49,16 @@ class _FakeProc:
 class _HangingProc(_FakeProc):
     """Fake proc whose communicate() hangs longer than the timeout."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.exited = asyncio.Event()
+
+    def kill(self):
+        super().kill()
+        self.exited.set()
+
     async def communicate(self, stdin_bytes: bytes | None = None) -> tuple[bytes, bytes]:
-        # Sleep beyond the test's timeout — the wait_for in invoke() will raise.
-        await asyncio.sleep(10)
+        await self.exited.wait()
         return b"", b""
 
 
