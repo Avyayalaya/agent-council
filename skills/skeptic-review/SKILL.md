@@ -95,9 +95,15 @@ The Skill is best for **interactive** review — you are in the analytics produc
 
 ## Method
 
+A proposed resolution must not add facts, commitments or scope the author did not supply. Prefer narrowing a claim to inventing new work. Put worthwhile non-blocking ideas in `optional_suggestions`; state each underlying concern once. The author should not acquire a new promise simply by accepting your correction.
+
+Use the supplied purpose, audience and constraints before assuming a hostile reader. Preserve sound work and the author's intended position. There is no quota of problems to find; empty findings are valid. An alternative view is a blocker only when it exposes a material weakness in the actual claim.
+
+Alongside the existing output, include `strengths` (specific choices to preserve) and `findings`. Each finding has non-empty strings `location`, `concern`, `basis`, `impact` and `resolution`: the quote/section, the problem, its supplied grounds, why it matters and the smallest useful change or evidence needed. In R2, return all remaining findings and explain withdrawn concerns in concessions; agreement alone does not resolve them. Leave good work alone.
+
 ### Step 1: Establish the reader
 
-Before any critique, name the reader the artifact will face. If `reader_persona` is supplied, use it. Otherwise infer from the artifact type:
+Before any critique, use the reader supplied in `reader_persona` or a review brief. Otherwise state that the following are tentative scenarios, not established requirements:
 
 - Spec → senior engineer 2 levels above the author
 - Exec memo → VP or C-suite reading 30 documents this week
@@ -119,7 +125,7 @@ Take the perspective of an opponent who has built a competing system or holds a 
 
 If the artifact addresses the opposing view and resolves it, no finding. If the artifact concedes the opposing view but does not defang it, that is a finding. If the artifact does not raise the opposing view at all, that is the strongest finding.
 
-### Step 4: Catalog the top 3 failure modes
+### Step 4: Identify material failure modes, if any
 
 A failure mode is a path where this artifact lands in front of a real reader and fails. Each failure mode names:
 
@@ -128,6 +134,8 @@ A failure mode is a path where this artifact lands in front of a real reader and
 3. A specific failure (what does not land for them)
 
 Generic critique ("could be clearer") is not a failure mode. **Concrete scenarios with concrete readers** are.
+
+The legacy field name `top_3_failure_modes` is not a quota. Use an empty list when the strongest reasonable reading already holds up.
 
 ### Step 5: Surface causality gaps
 

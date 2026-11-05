@@ -4,10 +4,10 @@ Agent Council MCP Server — exposes the Council quality gate to MCP-aware
 clients (Claude Desktop, Cursor, Cline, custom agents).
 
 Tools:
-  - council_review(artifact_path, tier=1, artifact_type=None, config=None)
-      Run the 5-deliberator Council on an artifact. Returns the full Verdict
-      structure (round1, round2, adjudicator synthesis, final_verdict, revision
-      brief). The audit row is also appended to council_log.jsonl.
+  - council_review(artifact_path, tier=1, artifact_type=None, config=None, review_brief=None)
+      Run four reviewers and a separate synthesis on an artifact. Returns the full Verdict
+      structure (per-deliberator rounds, verdict, reasoning and revision_brief).
+      The audit row is also appended to council_log.jsonl.
 
 Future tools (v0.1.2+):
   - council_sweep: bulk review over watch paths
@@ -105,21 +105,24 @@ async def council_review(
     tier: int = 1,
     artifact_type: str | None = None,
     config: str | None = None,
+    review_brief: str | None = None,
 ) -> dict[str, Any]:
-    """Run the 5-deliberator Council on a single text artifact.
+    """Run the Council on a single text artifact.
 
     Args:
         artifact_path: Absolute or relative path to the artifact to review.
-        tier: Tier classification — 1 (always review), 2 (skip), 3 (sample).
+        tier: Recorded tier classification. Explicit reviews do not skip/sample.
         artifact_type: Optional controlled-vocabulary label (e.g. "linkedin_post").
             Used for the D6 compounding loop — verdict history is keyed on this.
             If omitted, derived from tier_rules globs in council.yaml.
         config: Optional path to council.yaml. Defaults to $COUNCIL_CONFIG or
             ./council.yaml.
+        review_brief: Optional text describing purpose, audience, constraints
+            and supplied support. Shared with all reviewers and synthesis.
 
     Returns:
-        Full verdict dict with round1/round2 deliberator outputs, Adjudicator
-        synthesis, final_verdict (SHIP/REVISE/HOLD), and revision_brief.
+        Full verdict dict with per-deliberator outputs, Adjudicator synthesis,
+        verdict (SHIP/REVISE/HOLD/INCOMPLETE), strengths and revision_brief.
         The audit row is also appended to council_log.jsonl.
     """
     cfg_path = _resolve_config(config)
@@ -129,7 +132,9 @@ async def council_review(
         raise FileNotFoundError(f"Artifact not found: {artifact}")
 
     council = Council(cfg, config_dir=cfg_path.parent)
-    verdict = await council.run(artifact, tier=tier, artifact_type=artifact_type)
+    verdict = await council.run(
+        artifact, tier=tier, artifact_type=artifact_type, review_brief=review_brief
+    )
     return _verdict_to_dict(verdict)
 
 

@@ -2,8 +2,8 @@
 
 [![tests](https://github.com/Avyayalaya/agent-council/actions/workflows/test.yml/badge.svg)](https://github.com/Avyayalaya/agent-council/actions/workflows/test.yml)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![python ≥3.11](https://img.shields.io/badge/python-≥3.11-blue.svg)](pyproject.toml)
-[![version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md)
+[![Python tested: 3.11 to 3.13](https://img.shields.io/badge/python-tested%203.11%20to%203.13-blue.svg)](.github/workflows/test.yml)
+[![Python package: 0.1.0](https://img.shields.io/badge/python%20package-0.1.0-green.svg)](pyproject.toml)
 
 > *Four reviewers examine your work from distinct perspectives; a separate adjudicator turns their findings into a decision with reasons and required changes.*
 
@@ -38,7 +38,7 @@ cp council.yaml.example council.yaml  # then edit
 python -m agent_council review path/to/artifact.md --tier=1 --config=council.yaml
 ```
 
-Requires Python ≥3.11 and a configured runtime. `mock_cli` needs no model or external service.
+Python 3.11–3.13 are covered by [CI](.github/workflows/test.yml) and recommended. The [package metadata](pyproject.toml) permits Python ≥3.10, a broader range than is currently tested. A configured runtime is also needed; `mock_cli` needs no model or external service.
 
 ### MCP server (Claude Desktop, Cursor, Cline, custom agents)
 
@@ -66,7 +66,7 @@ Tool exposed: `council_review(artifact_path, tier=1)`. Full setup: [mcp/README.m
 
 ### GitHub Copilot CLI, Cursor, Cline, OpenCode (via APM Skills)
 
-`v0.1.1` ships each deliberator as a standalone Skill under [`skills/`](skills/) so any APM-compatible harness gets the methodology inline — no Python CLI required for single-perspective review.
+Plugin release `v0.1.1` introduced the standalone Skills under [`skills/`](skills/), so any APM-compatible harness gets the methodology inline — no Python CLI required for single-perspective review. Plugin releases and the Python package are versioned independently; the Python package remains at `0.1.0`. See the [CHANGELOG](CHANGELOG.md) for plugin release history.
 
 ```bash
 apm marketplace add Avyayalaya/agent-council
@@ -184,6 +184,37 @@ python -m agent_council audit --since=7d --log=council_log.jsonl
 
 Review output is human-readable unless `--json` is supplied. Each completed protocol run, including structured failures, appends an audit row to the configured log. For an offline smoke review, use `--config=tests/council.example.yaml` with `tests/sample_artifact.md`; the shipped mock fixture returns `REVISE` (exit 1).
 
+### Review what matters and preserve what works
+
+Council's reviewer guidance asks for consequential concerns, the supplied grounds for them, and the smallest useful change or evidence that would resolve them. It explicitly permits no findings when the work is sound. Synthesis can also return `strengths`: specific choices to preserve rather than generic praise.
+
+The final response separates **required changes** (`revision_brief`), **optional ideas** (`optional_suggestions`) and **what to preserve** (`strengths`). Optional ideas do not affect the code-enforced verdict policy or substitute for a missing required brief. Exact duplicate strings in the two lists are removed while original model output remains archived. Prompts ask for one action per underlying issue and forbid adding unsupplied facts or commitments to replacement wording. These are judgment instructions, not a mechanical guarantee that every suggested sentence is faithful; the operator still checks the proposal.
+
+Give the reviewers a short optional brief instead of asking them to infer your purpose:
+
+```text
+Purpose: share an early result, not promise a proven effect.
+Audience: team leads deciding whether to try the approach.
+Style: preserve the direct, measured tone.
+Support: two teams reported shorter reviews; there was no comparison group.
+```
+
+Save it as `review-brief.md` and pass it with the artifact:
+
+```bash
+python -m agent_council review path/to/artifact.md --config=council.yaml --brief-file=review-brief.md
+```
+
+Python callers can supply `await council.run(artifact, review_brief="Purpose: ...")`; MCP `council_review` accepts the same optional text argument. The brief reaches both rounds and synthesis. It supplements role-specific context without granting file/tool access or changing the configured quorum. Voice and Strategy can assess explicit style/purpose instructions in the brief without pretending to know a wider personal corpus.
+
+The returned `artifact_sha256` identifies the captured UTF-8 text that was actually reviewed. The archive uses that same snapshot even if the on-disk file changes during review. A supplied brief is also archived and hashed as `review_brief_sha256`. Callers must compare versions before acting on a verdict; Council does not publish or apply changes for them.
+
+Reviewers may return structured `findings` with `location`, `concern`, `basis`, `impact` and `resolution`. Valid entries are retained separately as `r1_findings` and `r2_findings`, so a change of view remains inspectable. R2 `findings` is the complete remaining set, including an explicit empty list when all concerns were withdrawn. The older role-specific outputs are still accepted; known aliases such as `voice_violations` and `violations` are normalized without inventing missing details. Blank fields in normalized legacy records mean that detail was not supplied.
+
+Returned `r2_findings: null` means R2 supplied no finding list (or failed/was disabled), not that every R1 concern was withdrawn. An explicit empty list is preserved as `[]`. These records support inspection of both rounds; automatic finding resolution and selective re-review are not implemented.
+
+These changes establish clearer instructions and preserve their output; mock/scripted tests do **not** prove improved judgment by a real model. Validate usefulness on representative sound and flawed work before making quality claims.
+
 ### See what a verdict looks like
 
 [`examples/demo/`](examples/demo/) ships a fictional LinkedIn post + the structured verdict the Council produced for it + the extracted revision brief. Read these first to calibrate expectations before running your first real review.
@@ -208,7 +239,7 @@ The Council was designed to be invoked from outside an agent loop, not from insi
 PYTHONPATH=src python -m unittest tests.test_modularity_invariant -v
 ```
 
-The test scans the host operator system's `agents/*/prompt.md` files and asserts zero references to Council. If a producing agent's prompt starts to know about the gate that reviews it, the build fails.
+When Council is installed within the expected host-workspace layout, the prompt check scans that external system's `agents/*/prompt.md` files for known Council references, with explicit exemptions for routing agents. Those host-agent files are not shipped in this repository. The prompt check is skipped when the host directory or prompts are absent, as in a standalone checkout; the separate package-import isolation checks still run.
 
 This means:
 
@@ -244,6 +275,10 @@ The keyword-only `adapter` skips configured runtime construction. Omitting it (o
 ### Add a configured runtime adapter
 
 Implement the existing [`RuntimeAdapter`](src/agent_council/runtimes/base.py) interface: `async invoke(prompt, context, model=None) -> str`, `health_check() -> bool`, and `adapter_name() -> str`. `invoke` must complete within the adapter timeout or raise `asyncio.TimeoutError`; runtime failures raise `RuntimeError`. To select it through YAML/CLI, register it in `src/agent_council/runtimes/__init__.py`. A caller-supplied adapter needs no registry change.
+
+The built-in Claude and Ollama adapters share `run_subprocess(args, prompt=None)`: UTF-8 stdin when a prompt is supplied, closed stdin otherwise, expected launch errors reported as `RuntimeError`, and bounded communication cleanup after timeout or cancellation. Cleanup terminates the directly launched child; it is not a sandbox or a guarantee about arbitrary descendant processes. It can take up to five additional seconds, with an explicit warning if cleanup cannot finish. Windows commands exceeding the process-creation limit are rejected before launch without truncation. Use supported stdin transport for large prompts; this helper does not implement or accept the pending contributor Copilot adapter.
+
+For Claude, an explicit `invoke(..., model=...)` overrides model settings in either `--model value` or `--model=value` flags. Without an override, existing flag selection still takes precedence over `runtime.model`. Health checks remain explicit; the review does not add hidden provider calls.
 
 ### Add a new deliberator
 

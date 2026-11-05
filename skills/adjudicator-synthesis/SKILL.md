@@ -55,7 +55,7 @@ You have run 2 or more deliberator skills on the same artifact. Each produced a 
 
 The Adjudicator is **not** a fifth deliberator. It does not produce a new critique. Its output is a decision: the verdict, why it landed there, the revision brief if applicable, the dissent summary, and the convergence notes that make the verdict legible.
 
-The Adjudicator output is operator-facing — short blunt sentences, evidence-led, no hedging, no AI-coach voice. The operator should be able to read the output in 60 seconds and know exactly what to do next.
+The Adjudicator output is operator-facing: concise, evidence-led, honest about uncertainty, and clear about what to preserve, change or decide.
 
 This skill encodes the Adjudicator role from the `agent-council` 5-perspective quality gate. Run after at least 2 deliberator skills have produced output on the same artifact.
 
@@ -94,6 +94,18 @@ The policy is not negotiable. Compromise verdicts ("REVISE-LITE") are failures. 
 
 ## Method
 
+Ground the decision in the supplied purpose, audience and constraints. Preserve sound work; there is no quota of problems to find and a good artifact can ship unchanged. Return `strengths` as specific choices worth retaining, or an empty list when none need emphasis.
+
+Where reviewers supply `findings`, retain their `location`, `concern`, `basis`, `impact` and `resolution` when synthesizing useful actions. Group duplicates without erasing different grounds. R2 findings are the reviewer's complete remaining concerns; do not revive a withdrawn R1 concern without new reasons. Agreement does not verify a source, and an operator trade-off is not a defect the model can decide away.
+
+This standalone skill's guidance does not replace Python runtime enforcement. When given a configured Council policy, use that policy, including its scores, quorum and fallback rules, instead of assuming the default table covers every run.
+
+### Do no more than necessary
+
+A proposed correction must not add facts, commitments, deadlines, audiences, experiments or scope the author did not supply. Check replacement wording against the artifact and brief. Prefer a narrower supported statement to an invented plan to gather evidence. Additional work is an optional author decision, not an existing commitment.
+
+Keep necessary changes in `revision_brief`, non-blocking ideas in `optional_suggestions`, and what to preserve in `strengths`. Empty lists are valid. State each required change once: group related reviewer observations under the same correction rather than adding separate substance, tone and strategy edits to the same sentence. Do not put praise or optional polish into the action list.
+
 ### Step 1: Verify the input shape
 
 Confirm each deliberator critique has the expected schema (role, round, score, would_block, irreducible, plus role-specific fields). If a critique is malformed, treat that deliberator as "not present" and note it in `dissent_summary`. If fewer than 2 valid deliberator critiques are present, return `verdict: "INCOMPLETE"` with a clear reason.
@@ -113,7 +125,7 @@ Numbered list. Each item:
 - States the concrete change
 - Cites the line, paragraph, or claim affected
 
-4-8 items max. **If more than 8 items would be needed, the verdict should have been HOLD, not REVISE.** Recommend HOLD instead.
+Use only as many actions as the material concerns require. Do not pad the brief to reach a count or change a verdict merely because a list is long. Each action should explain the smallest useful change, evidence or operator decision that would resolve the concern.
 
 The operator should be able to act on the brief without re-reading the deliberator critiques. The brief is for the operator's hands.
 
@@ -142,6 +154,8 @@ Single fenced JSON block:
   "verdict": "SHIP | REVISE | HOLD | INCOMPLETE",
   "reasoning": "≤3 sentences. Why this verdict. Which deliberators blocked, what their root issue was, why Round 2 did or did not resolve it.",
   "revision_brief": "Numbered list as a single string. Each item: deliberator + concrete change + line/paragraph. Null when verdict is SHIP. Required when REVISE or HOLD.",
+  "optional_suggestions": [],
+  "strengths": [],
   "dissent_summary": "≤4 sentences. Which deliberators blocked, what converged in R2, what diverged, any irreducible flags.",
   "convergence_notes": "≤2 sentences. Where two or more deliberators caught the same underlying issue from different angles."
 }

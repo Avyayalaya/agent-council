@@ -86,9 +86,9 @@ The skill encodes the Voice & Identity role from the `agent-council` 5-deliberat
 
 ## Hard Prerequisite
 
-This skill **requires** the operator's voice corpus in context. Specifically: the V1-V15 rule set, the 9 voice ingredients, the channel-specific registers, the banned-pattern list. Without this corpus, the skill returns an error rather than fabricating voice critique from training-data priors.
+This skill requires supplied voice examples/recipe or explicit style instructions in a review brief. Use only the rules and register applicable to this work. A brief alone permits assessment of its stated style, not a claim that you know the author's personal voice.
 
-If the voice corpus is missing, return: `{"error": "voice_corpus_missing", "needs": "voice_recipe.md with V1-V15 rules and banned-pattern list"}`. This is non-negotiable. Voice critique without the corpus is hallucination dressed as discipline.
+If neither voice context nor explicit style instructions is supplied, return `{"error": "voice_corpus_missing"}` rather than inventing personal preferences.
 
 ## Standalone vs Composed Use
 
@@ -101,9 +101,15 @@ If the voice corpus is missing, return: `{"error": "voice_corpus_missing", "need
 
 ## Method
 
+A proposed resolution must not add facts, commitments or scope the author did not supply. Preserve meaning when changing wording. If another role already identifies the same overstatement, add the voice rationale without creating a duplicate required edit. Put stylistic preferences in `optional_suggestions`, not the blocking findings.
+
+Preserve distinctive wording that serves the supplied audience and purpose. There is no quota of problems to find; empty findings are valid. The examples below are not universal bans or channel rules. Apply an executive/CXO test only when the brief requires that register. Leave good work alone.
+
+Alongside the existing output, include `strengths` (choices to preserve) and `findings`. Each finding has non-empty strings `location`, `concern`, `basis`, `impact` and `resolution`: the quote, mismatch, supplied rule/example, reader consequence and smallest useful change. In R2 return all remaining findings and explain withdrawals; another reviewer's confidence is not a voice rule.
+
 ### Step 1: Confirm the corpus is loaded
 
-Before reading the artifact, confirm V1-V15 rules and the channel registers are in context. If not, return the corpus-missing error. Do not proceed.
+Before reading the artifact, establish the supplied voice rules or brief's explicit style instructions. If neither exists, return the corpus-missing error.
 
 ### Step 2: Scan line by line for banned patterns
 
@@ -117,7 +123,7 @@ For each violation, record: line number, rule ID, the offending snippet, the con
 
 ### Step 3: Assess register for the channel
 
-The same content can be correctly written for Substack longform but wrong for LinkedIn (or vice versa). Each channel has an approved register:
+The same content can suit one channel and not another. Use the supplied audience and examples; these are possible registers, not mandatory defaults:
 
 - **Substack longform:** Evidence-dense, multi-section, deliberate. Opens with a claim or a problem framing, not a hook.
 - **LinkedIn post:** Tight, single load-bearing insight, blunt close. Not "thread" cadence.
@@ -132,7 +138,7 @@ Mismatch → flag with the specific shift required.
 
 Ask: would a CPO say this in a board meeting? Would a CEO of a growth-stage company own this on stage?
 
-This is not "is this sufficiently professional." It is "does this sentence carry the authority of someone who has actually run the thing." If the answer is "no, this sounds like a junior PM in clever-mode" or "no, this sounds like an AI-coach LinkedIn influencer," flag where the test breaks with the specific sentence.
+Use this check only for an explicitly executive-facing brief, and ground concerns in the supplied purpose/rules rather than stereotypes about seniority. Otherwise assess the requested register without forcing it into a boardroom style.
 
 ### Step 5: Identity coherence one-liner
 
@@ -140,7 +146,7 @@ Does this sound like the operator? Or does it drift into a positioning the opera
 
 ### Step 6: Set block flags
 
-`would_block: true` if any of: (a) a banned pattern appears in a **load-bearing** sentence (banned patterns in filler are notes, not blocks); (b) the register is wrong for the channel; (c) the CXO test fails on a public-facing piece.
+`would_block: true` only for a consequential mismatch with a supplied requirement or intended audience. Cosmetic preferences and example-only banned patterns are not blockers.
 
 `irreducible: true` only if the voice is so far off it cannot be edited into compliance — only redrafted. Rare. Most voice issues are line-level fixable.
 

@@ -26,6 +26,10 @@ R1 preserves distinct starting perspectives. R2 can expose new questions across 
 
 The Adjudicator has no R1 position of its own to defend. It groups related findings, explains useful disagreement and recommends required changes. The runtime separately enforces its verdict policy. `rounds: 1` omits R2; a later review of a revised artifact is a new caller-initiated run.
 
+An optional review brief supplies purpose, audience, constraints and support to every reviewer and synthesis. Role-specific files remain separate; the brief does not cause extra retrieval or tool access. The prompts prioritize material concerns, preserved strengths and minimal resolution rather than a quota of criticism.
+
+Optional structured findings carry `location`, `concern`, `basis`, `impact` and `resolution`. Both rounds' normalized findings are returned/logged without silently dropping unfamiliar headline aliases such as `violations`. Legacy missing details stay blank. A supplied R2 `findings` list describes the complete remaining set, so an explicit empty list does not revive R1 concerns in a missing-brief fallback. These are recorded model assessments, not proof that their citations or conclusions are correct.
+
 The [personal workflow diagram](assets/ai-review-loop-v1.0.png), **How I use AI to review my work**, covers authored, AI-generated and co-created content. Its stricter "required reviews complete" standard is not the runtime default: three valid R1 reviews may suffice, with R1 fallback when R2 fails. The image is a workflow illustration, not an exact executable state machine or automatic publication authority.
 
 ## Completion, failures and stopping
@@ -35,6 +39,8 @@ Only schema-valid R1 reviews count toward `min_deliberators_for_verdict` (defaul
 Each malformed output gets at most one schema reprompt. Runtime errors do not trigger extra retries. An initial synthesis timeout/runtime failure, a runtime failure during its schema retry, or exhausted synthesis schema validation returns `INCOMPLETE` with an error and available review transcripts. No strict all-four/all-round completeness rule is added.
 
 The verdict exposes R1 `error`, `r1_schema_failed`, `r2_error`, `r2_schema_failed`, and top-level `adjudicator_error`. R2 failure does not change `succeeded` when R1 is valid. Human-readable dissent also names failures and fallback. Setup and unexpected programming errors may raise; log-write errors propagate and archive-write errors produce the existing warning rather than a false archive-success claim.
+
+The built-in subprocess adapters normalize expected process-launch errors and drain the directly launched child after killing it on timeout/cancellation. Cleanup is bounded to five seconds; failure is warned on stderr. Cancellation still propagates. This does not promise termination of every descendant a provider may launch, restrict its tools, or add retries.
 
 ## Recommendation versus enforced policy
 
@@ -53,6 +59,10 @@ A hard block is `would_block=true`. A score at or below `soft_block_score` (defa
 The synthesis receives these effective settings. [`merge_verdicts`](https://github.com/Avyayalaya/agent-council/blob/main/src/agent_council/orchestrator.py) normally takes the stricter recommendation, while permitting policy HOLD to become REVISE if the model recommends REVISE and no participating reviewer flagged irreducible. INCOMPLETE and irreducible HOLD cannot be bypassed.
 
 The final explanation identifies an overridden recommendation or the downgrade exception. Valid synthesis briefs are preserved. Missing/empty briefs do not change the verdict or cause extra model calls: the result explicitly reports the missing actionable plan, includes available reviewer findings, and directs the operator to the full critiques. It does not invent repairs.
+
+Synthesis is instructed to keep necessary edits in `revision_brief`, non-blocking ideas in `optional_suggestions`, and preserved choices in `strengths`. Suggestions/strengths may be omitted by legacy outputs or returned as empty lists. Their types are validated when supplied; they do not participate in the score/block policy. The final lists remove exact duplicates only. The runtime does not infer that two differently phrased actions are equivalent or mechanically verify that a replacement introduces no new commitment.
+
+Each reviewer invocation explicitly requests only the current round as one flat JSON object, preventing ambiguity between the two schema examples in a role prompt. This adds no round, retry or model call.
 
 ---
 
@@ -120,5 +130,7 @@ Each completed protocol run, including structured failure, appends a flat Rule 3
 ```
 
 The complete record also includes timestamp, artifact hash, runtime/model identity and elapsed time. Per-role records include validity, errors, scores, flags and R2 changes. Raw attempts and retries live in the archive under `span_id`, including invalid evidence. `adjudicator_synthesis.md` includes synthesis failure details when no usable synthesis is available.
+
+`artifact_sha256` is also returned in the verdict. `artifact.md` is written from the captured text used for the calls, never a later read of the source path. Its hash identifies the UTF-8 text after the artifact reader's newline normalization. A supplied brief is saved as `review_brief.md` with `review_brief_sha256` in the result/log. The brief's exact UTF-8 bytes, including its supplied line endings, are preserved; verify that hash against the archive bytes rather than a text reader that normalizes newlines. Callers must check that a current artifact still matches before treating a verdict as applicable.
 
 The optional Python `Council(..., adapter=runtime)` entry point changes only adapter selection; omitting it uses the configured factory. One adapter serves the whole protocol, and logs use that adapter's identity. Per-role runtime overrides and configured fail-fast behavior are not implemented.

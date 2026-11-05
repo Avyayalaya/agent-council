@@ -59,9 +59,13 @@ The server uses stdio transport by default. Spawn the process, send JSON-RPC req
 
 | Tool | Purpose | Status |
 |---|---|---|
-| `council_review` | Run the 5-deliberator Council on a single artifact | ✅ v0.1.1 |
-| `council_sweep` | Bulk review over watch paths | 🔜 v0.1.2 |
-| `council_audit` | Query the append-only log | 🔜 v0.1.2 |
+| `council_review` | Run four reviewers and separate synthesis, with an optional review brief | Available |
+| `council_sweep` | Bulk review over watch paths | Not exposed; use the CLI |
+| `council_audit` | Query the append-only log | Not exposed; use the CLI |
+
+The optional `review_brief` text describes purpose, audience, constraints and supplied support. It is shared with each reviewer and synthesis without changing the quorum or granting tool access. Returned records include normalized findings from both rounds, optional `strengths`, and the hashes of the captured artifact and supplied brief. `artifact_sha256` identifies the text actually reviewed, even if the on-disk artifact changes during the run.
+
+`optional_suggestions` contains non-blocking ideas, separate from required changes in `revision_brief` and choices to preserve in `strengths`. The code-enforced verdict rules do not depend on these optional suggestions.
 
 ---
 

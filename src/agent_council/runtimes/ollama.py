@@ -16,8 +16,8 @@ P2 W4 because:
 
 Invocation pattern (W4): ``ollama run <model>`` piped from stdin/stdout with
 UTF-8 explicit on both ends (P29 — Windows + UTF-8 lesson from ClaudeCLIAdapter).
-If ``ollama`` is not on PATH, ``health_check()`` returns False and the
-orchestrator fails fast.
+``health_check()`` is an explicit availability probe; failed invocation is
+reported as a runtime error without an implicit provider call.
 
 See ``docs/adapters.md`` for the adapter-choice Decision Memo
 (``plan/decision_memo_p2_w4_adapter_choice.md``) explaining why ollama
@@ -26,9 +26,7 @@ was picked over ``gh copilot``/``gh models``.
 
 from __future__ import annotations
 
-import asyncio
 import shutil
-import sys
 from typing import Iterable
 
 from agent_council.runtimes.base import RuntimeAdapter
@@ -99,37 +97,4 @@ class OllamaAdapter(RuntimeAdapter):
 
         full = self.build_full_prompt(prompt, context)
 
-        # Ensure ProactorEventLoop on Windows (B26 — required for asyncio
-        # subprocess on win32; matches ClaudeCLIAdapter pattern).
-        if sys.platform == "win32":
-            try:
-                asyncio.get_event_loop_policy()
-            except RuntimeError:
-                asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
-        proc = await asyncio.create_subprocess_exec(
-            *args,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(full.encode("utf-8")),
-                timeout=self.timeout_seconds,
-            )
-        except asyncio.TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            raise
-
-        if proc.returncode != 0:
-            err = stderr_b.decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(
-                f"ollama exited with code {proc.returncode}: {err}"
-            )
-
-        return stdout_b.decode("utf-8", errors="replace")
+        return await self.run_subprocess(args, full)

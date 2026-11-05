@@ -54,8 +54,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="agent-council",
         description=(
             "A runtime-portable 5-agent adjudicator council for universal quality "
-            "gating. Reviews an artifact via 5 deliberators in 2 async rounds, "
-            "returns SHIP / REVISE / HOLD."
+            "gating. Four reviewers, two review rounds and separate synthesis; "
+            "returns SHIP / REVISE / HOLD / INCOMPLETE."
         ),
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -66,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_review.add_argument("--tier", type=int, default=None, help="Override tier classification.")
     p_review.add_argument("--config", required=True, help="Path to council.yaml.")
     p_review.add_argument("--json", action="store_true", help="Print verdict as JSON.")
+    p_review.add_argument("--brief-file", help="UTF-8 file describing purpose, audience, constraints and supplied support.")
 
     # sweep
     p_sweep = sub.add_parser(
@@ -177,8 +178,18 @@ def _cmd_review(args: argparse.Namespace) -> int:
         tc = TierClassifier(rules=config.get("tier_rules") or {})
         tier, _ = tc.classify(artifact_path)
 
+    review_brief = None
+    if args.brief_file:
+        try:
+            review_brief = Path(args.brief_file).expanduser().read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as e:
+            print(f"error: cannot read review brief: {e}", file=sys.stderr)
+            return EXIT_CONFIG_ERROR
+        if not review_brief.strip():
+            print("error: review brief must not be empty", file=sys.stderr)
+            return EXIT_CONFIG_ERROR
     council = Council(config=config, config_dir=config_path.parent)
-    verdict = asyncio.run(council.run(artifact_path, tier=tier))
+    verdict = asyncio.run(council.run(artifact_path, tier=tier, review_brief=review_brief))
 
     if args.json:
         print(verdict.to_json())
@@ -262,14 +273,25 @@ def _print_human(verdict, tier: int) -> None:
     """Pretty-print a verdict for stdout."""
     print(f"Verdict: {verdict.verdict}  (tier {tier})")
     print(f"span_id: {verdict.span_id}")
+    print(f"Reviewed version: {verdict.artifact_sha256}")
     print()
     print("Reasoning:")
     print(f"  {verdict.reasoning}")
     if verdict.revision_brief:
         print()
-        print("Revision brief:")
+        print("Required changes:")
         for line in verdict.revision_brief.splitlines():
             print(f"  {line}")
+    if verdict.optional_suggestions:
+        print()
+        print("Optional suggestions (not required to ship):")
+        for suggestion in verdict.optional_suggestions:
+            print(f"  - {suggestion}")
+    if verdict.strengths:
+        print()
+        print("What to preserve:")
+        for strength in verdict.strengths:
+            print(f"  - {strength}")
     if verdict.dissent_summary:
         print()
         print("Dissent summary:")
@@ -281,8 +303,9 @@ def _print_human(verdict, tier: int) -> None:
         if not r.succeeded:
             print(f"  {did:18s}  ERROR: {r.error}")
             continue
-        block = "BLOCK" if r.r2_would_block else "ok   "
-        irr = " IRREDUCIBLE" if r.r2_irreducible else ""
+        used_r2 = r.raw_r2 is not None
+        block = "BLOCK" if (r.r2_would_block if used_r2 else r.r1_would_block) else "ok   "
+        irr = " IRREDUCIBLE" if used_r2 and r.r2_irreducible else ""
         print(
             f"  {did:18s}  r1={r.r1_score} r2={r.r2_score}  {block}{irr}"
         )

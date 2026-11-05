@@ -35,8 +35,10 @@ from agent_council.schema import (
 from agent_council.tier import TierClassifier
 from agent_council.verdict import (
     DeliberatorResult,
+    LEGACY_FINDING_FIELDS,
     Verdict,
     VerdictPolicy,
+    normalize_findings,
     summarize_round2_changes,
 )
 
@@ -122,6 +124,8 @@ class Council:
         artifact_path: str | Path,
         tier: int = 1,
         artifact_type: str | None = None,
+        *,
+        review_brief: str | None = None,
     ) -> Verdict:
         """Execute the 2-round protocol on an artifact.
 
@@ -131,10 +135,16 @@ class Council:
             artifact_type: controlled-vocabulary label (e.g. ``"linkedin_post"``).
                 If None, derived from the configured TierClassifier — this is
                 what wires the prior-verdicts compounding loop (D6).
+            review_brief: optional purpose, audience, constraints and supplied
+                support for this run. Shared with each reviewer and synthesis.
 
         Returns:
             Verdict with full deliberator records and Adjudicator synthesis.
         """
+        if review_brief is not None and (
+            not isinstance(review_brief, str) or not review_brief.strip()
+        ):
+            raise ValueError("review_brief must be non-empty text when supplied")
         artifact_path = Path(artifact_path)
         if not artifact_path.exists():
             raise FileNotFoundError(f"Artifact not found: {artifact_path}")
@@ -181,7 +191,8 @@ class Council:
 
         # ---- Round 1: independent critique ----
         r1_results = await self._fan_out(
-            delibs_cfg, deliberator_prompts, deliberator_contexts, artifact_text, r2_inputs=None
+            delibs_cfg, deliberator_prompts, deliberator_contexts, artifact_text,
+            r2_inputs=None, review_brief=review_brief,
         )
 
         if rounds >= 2:
@@ -193,6 +204,7 @@ class Council:
                 artifact_text,
                 r2_inputs=r1_results,
                 cross_read=cross_read,
+                review_brief=review_brief,
             )
         else:
             r2_results = {}
@@ -204,6 +216,7 @@ class Council:
             r1_results,
             r2_results,
             prior_verdicts=prior_verdicts,
+            review_brief=review_brief,
         )
 
         # Assemble DeliberatorResult records.
@@ -226,20 +239,28 @@ class Council:
             )
             if r1 and r1.get("payload") and not r1_schema_failed:
                 payload = r1["payload"]
+                dr.r1_findings = normalize_findings(payload)
                 dr.r1_score = _coerce_int(payload.get("score"))
                 dr.r1_would_block = bool(payload.get("would_block"))
                 top_issues = (
                     payload.get("top_3_issues")
                     or payload.get("top_3_failure_modes")
                     or payload.get("voice_violations")
+                    or payload.get("violations")
                     or payload.get("calibration_issues")
                     or []
                 )
                 if isinstance(top_issues, list):
                     dr.top_issues = [str(x) for x in top_issues[:5]]
+                if "findings" in payload:
+                    dr.top_issues = [finding.concern for finding in dr.r1_findings[:5]]
             if r2 and r2.get("payload") and not r2_schema_failed:
                 payload = r2["payload"]
                 dr.raw_r2 = payload
+                if "findings" in payload or any(
+                    isinstance(payload.get(key), list) for key in LEGACY_FINDING_FIELDS
+                ):
+                    dr.r2_findings = normalize_findings(payload)
                 dr.r2_score = _coerce_int(payload.get("score"))
                 dr.r2_would_block = bool(payload.get("would_block"))
                 dr.r2_irreducible = bool(payload.get("irreducible"))
@@ -306,6 +327,13 @@ class Council:
             adjudicator_raw=adj_payload,
             span_id=span_id,
             adjudicator_error=adj_error,
+            artifact_sha256=artifact_sha,
+            review_brief_sha256=CouncilLog.hash_artifact(review_brief) if review_brief is not None else None,
+            strengths=list(dict.fromkeys((adj_payload or {}).get("strengths") or [])) if not adj_error else [],
+            optional_suggestions=(
+                list(dict.fromkeys((adj_payload or {}).get("optional_suggestions") or []))
+                if not adj_error else []
+            ),
         )
 
         # Persist log + archive.
@@ -322,6 +350,8 @@ class Council:
             adjudicator_raw=adj_raw,
             adjudicator_schema=adj_schema_meta,
             prior_verdicts_used=len(prior_verdicts),
+            artifact_text=artifact_text,
+            review_brief=review_brief,
         )
         return verdict
 
@@ -336,6 +366,7 @@ class Council:
         artifact_text: str,
         r2_inputs: dict[str, dict[str, Any]] | None,
         cross_read: bool = True,
+        review_brief: str | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Fire one round of deliberator calls in parallel with schema enforcement.
 
@@ -381,6 +412,13 @@ class Council:
                 cross_pack = _format_cross_read(r2_inputs, focus_id=did, cross_read=cross_read)
                 ctx = [fenced, cross_pack, *contexts[did]]
                 prompt_text = f"{prompt_text}\n\n{ROUND_2_MARKER}\n\n_See the other deliberators' Round 1 critiques in context. Produce a Round 2 rebuttal: updated score, concessions, escalations, final would_block, final irreducible. Respond ONLY with JSON inside a fenced code block._"
+            prompt_text += (
+                f"\n\nThis invocation is Round {round_num} only. Return one flat JSON object "
+                f"for your Round {round_num} response, not an object containing both rounds. "
+                "Do not invent or pre-write another reviewer's response."
+            )
+            if review_brief is not None:
+                ctx.append(_format_review_brief(review_brief))
             tasks.append(
                 asyncio.create_task(
                     self._invoke_with_schema(
@@ -508,6 +546,7 @@ class Council:
         r1: dict[str, dict[str, Any]],
         r2: dict[str, dict[str, Any]],
         prior_verdicts: list[dict[str, Any]] | None = None,
+        review_brief: str | None = None,
     ) -> tuple[str, dict[str, Any] | None, dict[str, Any]]:
         """Run the Adjudicator synthesis call with schema enforcement.
 
@@ -529,6 +568,8 @@ class Council:
         ))
         pack = "\n\n".join(pack_parts)
         ctx = [fence_artifact(artifact_text), pack]
+        if review_brief is not None:
+            ctx.append(_format_review_brief(review_brief))
 
         try:
             result = await self._invoke_with_schema(
@@ -566,6 +607,8 @@ class Council:
         adjudicator_raw: str,
         adjudicator_schema: dict[str, Any],
         prior_verdicts_used: int,
+        artifact_text: str,
+        review_brief: str | None = None,
     ) -> None:
         """Write the verdict line to JSONL + dump full transcripts to archive."""
         # Decorate the per-deliberator records with schema metadata (D5).
@@ -585,6 +628,7 @@ class Council:
             "event": "verdict",
             "artifact_path": artifact_path,
             "artifact_sha256": artifact_sha,
+            "review_brief_sha256": verdict.review_brief_sha256,
             "tier": tier,
             "artifact_type": artifact_type,
             "verdict": verdict.verdict,
@@ -592,6 +636,8 @@ class Council:
             "adjudicator_reasoning": verdict.reasoning,
             "revision_brief": verdict.revision_brief,
             "dissent_summary": verdict.dissent_summary,
+            "strengths": verdict.strengths,
+            "optional_suggestions": verdict.optional_suggestions,
             "adjudicator_error": verdict.adjudicator_error,
             "adjudicator_schema_failed": bool(adjudicator_schema.get("schema_failed")),
             "adjudicator_reprompts": int(adjudicator_schema.get("reprompts", 0)),
@@ -610,9 +656,11 @@ class Council:
             arch_dir = Path(self._archive_dir) / verdict.span_id
             arch_dir.mkdir(parents=True, exist_ok=True)
             (arch_dir / "artifact.md").write_text(
-                Path(artifact_path).read_text(encoding="utf-8", errors="replace"),
+                artifact_text,
                 encoding="utf-8",
             )
+            if review_brief is not None:
+                (arch_dir / "review_brief.md").write_text(review_brief, encoding="utf-8", newline="")
             for did, r in r1_results.items():
                 raw = r.get("raw") or ""
                 if r.get("raw_retry"):
@@ -866,7 +914,12 @@ def explain_verdict(
     for role, result in results.items():
         if not result.succeeded:
             continue
-        findings.extend(f"{role} (R1): {issue}" for issue in result.top_issues)
+        if result.r2_findings is not None:
+            findings.extend(f"{role} (R2): {finding.describe()}" for finding in result.r2_findings)
+        elif result.r1_findings:
+            findings.extend(f"{role} (R1): {finding.describe()}" for finding in result.r1_findings)
+        else:
+            findings.extend(f"{role} (R1): {issue}" for issue in result.top_issues)
         findings.extend(f"{role} (R2 escalation): {issue}" for issue in result.r2_escalations)
     brief = "No actionable revision brief was supplied. "
     if findings:
@@ -974,6 +1027,16 @@ def _format_cross_read(
     return "".join(lines)
 
 
+def _format_review_brief(brief: str) -> str:
+    return (
+        "# === Review brief supplied by the caller ===\n"
+        "Use this purpose, audience, constraints and support to assess the artifact. "
+        "Distinguish supplied evidence from unverified assertions. Preserve the author's "
+        "intent; do not invent missing goals or require unnecessary edits.\n\n"
+        + brief
+    )
+
+
 def _format_prior_verdicts(prior: list[dict[str, Any]]) -> str:
     """Render the prior-verdicts context blob the Adjudicator sees (D6 / §6).
 
@@ -983,9 +1046,9 @@ def _format_prior_verdicts(prior: list[dict[str, Any]]) -> str:
     """
     lines = [
         "# === Prior verdicts on this artifact_type ===\n",
-        "_(For Adjudicator weighting only. The Council learns from itself: "
-        "settled patterns earn weight; flips against prior consensus deserve "
-        "explicit reasoning.)_\n",
+        "_(Historical context only, not proof about the current artifact. "
+        "Assess the current brief and supplied evidence on their merits. "
+        "Do not inherit a prior verdict or treat agreement as verification.)_\n",
     ]
     for i, rec in enumerate(prior, start=1):
         ts = rec.get("ts") or "?"
@@ -1036,7 +1099,11 @@ def _format_adjudicator_pack(
     parts.append(
         "\n"
         "Respond ONLY with JSON in a fenced code block, with fields: "
-        "verdict, reasoning, revision_brief (null if SHIP), dissent_summary.\n"
+        "verdict, reasoning, revision_brief (required changes only; null if SHIP), "
+        "optional_suggestions (non-blocking ideas, may be empty), "
+        "strengths (what to preserve, may be empty), dissent_summary. "
+        "State each required change once. Do not add unsupplied facts or commitments "
+        "to suggested replacement wording.\n"
     )
     return "".join(parts)
 

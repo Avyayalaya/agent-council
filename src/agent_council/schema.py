@@ -41,6 +41,7 @@ ROLE_ADJUDICATOR = "adjudicator"
 
 # Single re-prompt only — design §9 F2 + RW4-2 mitigation.
 MAX_REPROMPTS = 1
+FINDING_FIELDS = ("location", "concern", "basis", "impact", "resolution")
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +62,9 @@ _R1_COMMON = {
     # ``irreducible`` is optional at R1 (some deliberators only set it at R2).
     "optional_types": {
         "irreducible": "bool",
+        "findings": "list",
+        "strengths": "list",
+        "optional_suggestions": "list",
     },
 }
 
@@ -72,6 +76,7 @@ _R2_COMMON = {
         "irreducible": "bool",
     },
     "ranges": {"score": (1, 5)},
+    "optional_types": {"findings": "list", "strengths": "list", "optional_suggestions": "list"},
 }
 
 _ADJUDICATOR_R3 = {
@@ -85,6 +90,8 @@ _ADJUDICATOR_R3 = {
     "optional_types": {
         "revision_brief": "str_or_null",
         "dissent_summary": "str",
+        "strengths": "list",
+        "optional_suggestions": "list",
     },
     "nonempty": ["reasoning"],
 }
@@ -174,6 +181,21 @@ def validate(
         if key in payload and isinstance(payload[key], str) and not payload[key].strip():
             errors.append(f"key {key!r} must be a non-empty string")
 
+    if "findings" in type_map and isinstance(payload.get("findings"), list):
+        for index, finding in enumerate(payload["findings"]):
+            if not isinstance(finding, dict):
+                errors.append(f"findings[{index}] must be an object")
+                continue
+            for key in FINDING_FIELDS:
+                value = finding.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(f"findings[{index}].{key} must be a non-empty string")
+    for key in ("strengths", "optional_suggestions"):
+        if key in type_map and isinstance(payload.get(key), list):
+            for index, value in enumerate(payload[key]):
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(f"{key}[{index}] must be a non-empty string")
+
     return (not errors), errors
 
 
@@ -209,6 +231,14 @@ def stricter_format_instruction(
         shape_lines.append("  Optional fields:")
         for key, kind in opt.items():
             shape_lines.append(f"    - {key}: {kind}")
+        if "findings" in opt:
+            shape_lines.append(
+                "    findings may be empty. Each entry needs non-empty strings: "
+                + ", ".join(FINDING_FIELDS)
+            )
+        for key in ("strengths", "optional_suggestions"):
+            if key in opt:
+                shape_lines.append(f"    {key} may be empty; each entry must be a non-empty string.")
 
     err_block = "\n".join(f"  - {e}" for e in errors)
     shape_block = "\n".join(shape_lines)
